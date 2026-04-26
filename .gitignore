@@ -1,0 +1,40 @@
+# ===== Python / Flask =====
+backend/venv/
+backend/instance/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.so
+.env
+.env.*
+!.env.example
+
+# ===== Next.js / Node =====
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+frontend/tsconfig.tsbuildinfo
+
+# ===== OS / Editor =====
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ===== Project-specific temp files =====
+changes.txt
+resp_a_escaped.txt
+resp_b_escaped.txt
+response_A.diff
+response_A_terminal.txt
+response_B.diff
+response_B_terminal.txt
