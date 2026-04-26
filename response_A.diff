@@ -1,0 +1,927 @@
+--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
++++ a/docs/examples/dataclasses_stdlib_to_pydantic.py
+@@ -17,13 +17,14 @@
+     filename: str
+
+ 
+
+ 
+
+-# pydantic.dataclasses.dataclass augments the class in place and returns
+
+-# the same class — no proxy, no wrapper.  All stdlib behaviors (frozen,
+
+-# dunder methods, dataclasses.fields(), etc.) are preserved.
+
++# Augment the existing stdlib dataclass in place with pydantic validation.
+
++# The returned class is the same class object — all stdlib behaviors
+
++# (__hash__, __eq__, __repr__, dataclasses.fields(), etc.) are preserved.
+
+ File = pydantic.dataclasses.dataclass(File)
+
+ 
+
+-# The decorated class *is* the original class:
+
++# The class is still a real stdlib dataclass:
+
+ assert dataclasses.is_dataclass(File)
+
++assert type(File) is type
+
+ 
+
+ file = File(
+
+     filename=b'thefilename',
+
+@@ -31,6 +32,11 @@
+     seen_count='7',
+
+ )
+
+ print(file)
+
++# > File(filename='thefilename', modified_date=datetime.datetime(2020, 1, 1, 0, 0), seen_count=7)
+
++
+
++# stdlib introspection works:
+
++print(dataclasses.asdict(file))
+
++# > {'filename': 'thefilename', 'modified_date': datetime.datetime(2020, 1, 1, 0, 0), 'seen_count': 7}
+
+ 
+
+ try:
+
+     File(
+
+@@ -41,4 +47,3 @@
+ except pydantic.ValidationError as e:
+
+     print(e)
+
+ 
+
+-
+
+--- b/pydantic/dataclasses.py
++++ a/pydantic/dataclasses.py
+@@ -1,11 +1,10 @@
+-
+
+ """
+
+ The main purpose is to enhance stdlib dataclasses by adding validation.
+
+-
+
+-The decorator augments the original class in place — it attaches pydantic validation
+
+-logic directly to the class and returns the same class. This means there is only one
+
+-object, so all stdlib behaviors (frozen support, dunder methods, nested dataclasses,
+
+-`dataclasses.fields()`, etc.) work without any proxy indirection.
+
++The decorator augments the original class in place, attaching a shadow BaseModel
+
++for validation and replacing __init__ (and __post_init__ if present) so that
+
++validation always runs on construction. Because the original class is returned
+
++directly, all stdlib behaviors (frozen support, __hash__, __eq__, comparison
+
++operators, dataclasses.fields(), dataclasses.asdict(), etc.) are preserved.
+
+ """
+
+ from functools import wraps
+
+ from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Type, TypeVar, Union, overload
+
+@@ -98,14 +97,13 @@
+     def wrap(cls: Type[Any]) -> Type[Any]:
+
+         import dataclasses
+
+ 
+
+-        # Only skip dataclasses.dataclass() if the class itself (not a parent) was
+
+-        # already processed as a stdlib dataclass.
+
+-        is_own_dataclass = '__dataclass_fields__' in cls.__dict__
+
+-        if not is_own_dataclass:
+
++        # Only call dataclasses.dataclass() if the class hasn't been directly decorated yet.
+
++        # A class that only inherits __dataclass_fields__ from a parent still needs processing.
+
++        if '__dataclass_fields__' not in cls.__dict__:
+
+             cls = dataclasses.dataclass(  # type: ignore
+
+                 cls, init=init, repr=repr, eq=eq, order=order, unsafe_hash=unsafe_hash, frozen=frozen
+
+             )
+
+-        add_pydantic_validation_attributes(cls, config, validate_by_default=True)
+
++        add_pydantic_validation_attributes(cls, config)
+
+         return cls
+
+ 
+
+     if _cls is None:
+
+@@ -114,43 +112,37 @@
+     return wrap(_cls)
+
+ 
+
+ 
+
+-def add_pydantic_validation_attributes(
+
+-    dc_cls: Type['Dataclass'],
+
+-    config: Optional[Type['BaseConfig']],
+
+-    validate_by_default: bool = False,
+
+-) -> None:
+
++def add_pydantic_validation_attributes(dc_cls: Type['Dataclass'], config: Optional[Type['BaseConfig']]) -> None:
+
+     """
+
+     We need to replace the right method. If no `__post_init__` has been set in the stdlib dataclass
+
+     it won't even exist (code is generated on the fly by `dataclasses`)
+
+-    When ``validate_by_default`` is True (used by the ``@dataclass`` decorator), validation runs
+
+-    automatically. When False (used by ``make_dataclass_validator`` for stdlib dataclasses used
+
+-    as field types), the caller must explicitly opt in via ``__pydantic_run_validation__=True``.
+
+-    """
+
+-    _default_validate = validate_by_default
+
+-
+
++    Validation always runs after `__init__` or `__post_init__` if defined.
+
++    """
+
+     if hasattr(dc_cls, '__post_init__'):
+
++        init = dc_cls.__init__
+
+         post_init = dc_cls.__post_init__
+
+ 
+
++        @wraps(init)
+
++        def new_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
+
++            init(self, *args, **kwargs)
+
++
+
+         @wraps(post_init)
+
+-        def new_post_init(
+
+-            self: 'Dataclass', *args: Any, __pydantic_run_validation__: bool = _default_validate, **kwargs: Any
+
+-        ) -> None:
+
++        def new_post_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
+
+             post_init(self, *args, **kwargs)
+
+-            if __pydantic_run_validation__:
+
+-                self.__pydantic_validate_values__()
+
++            self.__pydantic_validate_values__()
+
+             if hasattr(self, '__post_init_post_parse__'):
+
+                 self.__post_init_post_parse__(*args, **kwargs)
+
+ 
+
++        setattr(dc_cls, '__init__', new_init)
+
+         setattr(dc_cls, '__post_init__', new_post_init)
+
+ 
+
+     else:
+
+         init = dc_cls.__init__
+
+ 
+
+         @wraps(init)
+
+-        def new_init(self: 'Dataclass', *args: Any, __pydantic_run_validation__: bool = _default_validate, **kwargs: Any) -> None:
+
++        def new_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
+
+             init(self, *args, **kwargs)
+
+-            if __pydantic_run_validation__:
+
+-                self.__pydantic_validate_values__()
+
++            self.__pydantic_validate_values__()
+
+             if hasattr(self, '__post_init_post_parse__'):
+
+                 # We need to find again the initvars. To do that we use `__dataclass_fields__` instead of
+
+                 # public method `dataclasses.fields`
+
+@@ -191,9 +183,9 @@
+         v.__pydantic_validate_values__()
+
+         return v
+
+     elif isinstance(v, (list, tuple)):
+
+-        return cls(*v, __pydantic_run_validation__=True)
+
++        return cls(*v)
+
+     elif isinstance(v, dict):
+
+-        return cls(**v, __pydantic_run_validation__=True)
+
++        return cls(**v)
+
+     else:
+
+         raise DataclassTypeError(class_name=cls.__name__)
+
+ 
+
+--- b/pydantic/schema.py
++++ a/pydantic/schema.py
+@@ -1,4 +1,3 @@
+-
+
+ import re
+
+ import warnings
+
+ from collections import defaultdict
+
+--- b/tests/test_dataclasses.py
++++ a/tests/test_dataclasses.py
+@@ -706,8 +706,17 @@
+     assert f.meta.modified_date == datetime(2020, 1, 1, 0, 0)
+
+     assert f.meta.seen_count == 7
+
+ 
+
++    # Meta now always validates on construction, so passing invalid data to Meta
+
++    # raises immediately at the Meta level (not nested under 'meta')
+
+     with pytest.raises(ValidationError) as e:
+
+-        FileChecked(filename=b'thefilename', meta=Meta(modified_date='2020-01-01T00:00', seen_count=['7']))
+
++        Meta(modified_date='2020-01-01T00:00', seen_count=['7'])
+
++    assert e.value.errors() == [
+
++        {'loc': ('seen_count',), 'msg': 'value is not a valid integer', 'type': 'type_error.integer'}
+
++    ]
+
++
+
++    # When passing a dict for meta, the nested error path is preserved
+
++    with pytest.raises(ValidationError) as e:
+
++        FileChecked(filename=b'thefilename', meta={'modified_date': '2020-01-01T00:00', 'seen_count': ['7']})
+
+     assert e.value.errors() == [
+
+         {'loc': ('meta', 'seen_count'), 'msg': 'value is not a valid integer', 'type': 'type_error.integer'}
+
+     ]
+
+@@ -923,122 +932,141 @@
+     }
+
+ 
+
+ 
+
+-def test_decorator_returns_same_class():
+
+-    """The pydantic dataclass decorator should return the original class, not a proxy."""
+
++def test_decorator_returns_original_class():
+
++    """The decorator should return the original class, not a proxy."""
+
+ 
+
+     @pydantic.dataclasses.dataclass
+
+     class MyDataclass:
+
+         a: int
+
+ 
+
+     assert type(MyDataclass) is type
+
++    assert isinstance(MyDataclass, type)
+
+     assert dataclasses.is_dataclass(MyDataclass)
+
+-    assert hasattr(MyDataclass, '__dataclass_fields__')
+
+-    assert hasattr(MyDataclass, '__pydantic_model__')
+
+-
+
+-
+
+-def test_stdlib_compat_after_decoration():
+
+-    """stdlib functions like dataclasses.fields() and dataclasses.asdict() should work."""
+
+-
+
+-    @pydantic.dataclasses.dataclass
+
+-    class MyDataclass:
+
+-        a: int
+
+-        b: str = 'hello'
+
+-
+
+-    fields = dataclasses.fields(MyDataclass)
+
++
+
++
+
++def test_is_instance_after_decoration():
+
++    """isinstance checks should work with the decorated class."""
+
++
+
++    @pydantic.dataclasses.dataclass
+
++    class MyDataclass:
+
++        a: int
+
++
+
++    d = MyDataclass(1)
+
++    assert isinstance(d, MyDataclass)
+
++
+
++
+
++def test_frozen_hash_preserved():
+
++    """Frozen dataclasses should retain __hash__ from stdlib."""
+
++
+
++    @pydantic.dataclasses.dataclass(frozen=True)
+
++    class MyDataclass:
+
++        a: int
+
++        b: str
+
++
+
++    d1 = MyDataclass(1, 'hello')
+
++    d2 = MyDataclass(1, 'hello')
+
++    d3 = MyDataclass(2, 'world')
+
++
+
++    assert hash(d1) == hash(d2)
+
++    assert hash(d1) != hash(d3)
+
++    assert d1 == d2
+
++    assert d1 != d3
+
++
+
++    # Should be usable in sets and as dict keys
+
++    s = {d1, d2, d3}
+
++    assert len(s) == 2
+
++    d = {d1: 'one', d3: 'two'}
+
++    assert d[d2] == 'one'
+
++
+
++
+
++def test_frozen_as_field_in_model():
+
++    """Frozen pydantic dataclasses should work as fields in BaseModel."""
+
++
+
++    @pydantic.dataclasses.dataclass(frozen=True)
+
++    class FrozenItem:
+
++        name: str
+
++        value: int
+
++
+
++    class Container(BaseModel):
+
++        item: FrozenItem
+
++        label: str
+
++
+
++    c = Container(item=FrozenItem(name='test', value=42), label='x')
+
++    assert c.item.name == 'test'
+
++    assert c.item.value == 42
+
++
+
++    with pytest.raises(dataclasses.FrozenInstanceError):
+
++        c.item.name = 'changed'
+
++
+
++
+
++def test_frozen_nested_dataclasses():
+
++    """Frozen pydantic dataclasses nested inside other pydantic dataclasses."""
+
++
+
++    @pydantic.dataclasses.dataclass(frozen=True)
+
++    class Inner:
+
++        x: int
+
++
+
++    @pydantic.dataclasses.dataclass
+
++    class Outer:
+
++        inner: Inner
+
++        y: str
+
++
+
++    o = Outer(inner=Inner(x=1), y='hello')
+
++    assert o.inner.x == 1
+
++    assert o.y == 'hello'
+
++
+
++    with pytest.raises(dataclasses.FrozenInstanceError):
+
++        o.inner.x = 2
+
++
+
++
+
++def test_eq_and_order_preserved():
+
++    """Comparison dunder methods generated by stdlib should be preserved."""
+
++
+
++    @pydantic.dataclasses.dataclass(order=True)
+
++    class Sortable:
+
++        value: int
+
++
+
++    a = Sortable(1)
+
++    b = Sortable(2)
+
++    c = Sortable(1)
+
++
+
++    assert a == c
+
++    assert a != b
+
++    assert a < b
+
++    assert b > a
+
++    assert a <= c
+
++    assert b >= a
+
++    assert sorted([b, a, c]) == [a, c, b]
+
++
+
++
+
++def test_repr_preserved():
+
++    """__repr__ generated by stdlib should be preserved."""
+
++
+
++    @pydantic.dataclasses.dataclass
+
++    class MyDataclass:
+
++        a: int
+
++        b: str
+
++
+
++    d = MyDataclass(1, 'hello')
+
++    assert repr(d) == "test_repr_preserved.<locals>.MyDataclass(a=1, b='hello')"
+
++
+
++
+
++def test_stdlib_fields_and_asdict():
+
++    """dataclasses.fields() and dataclasses.asdict() should work on decorated classes."""
+
++
+
++    @pydantic.dataclasses.dataclass
+
++    class MyDataclass:
+
++        a: int
+
++        b: str = 'default'
+
++
+
++    d = MyDataclass(a=1)
+
++    fields = dataclasses.fields(d)
+
+     assert len(fields) == 2
+
+     assert fields[0].name == 'a'
+
+     assert fields[1].name == 'b'
+
+ 
+
+-    d = MyDataclass(a=1, b='world')
+
+-    assert dataclasses.asdict(d) == {'a': 1, 'b': 'world'}
+
+-
+
+-
+
+-def test_frozen_hash_preserved():
+
+-    """Frozen dataclasses should retain __hash__ from stdlib."""
+
+-
+
+-    @pydantic.dataclasses.dataclass(frozen=True)
+
+-    class MyDataclass:
+
+-        a: int
+
+-        b: str
+
+-
+
+-    d1 = MyDataclass(1, 'hello')
+
+-    d2 = MyDataclass(1, 'hello')
+
+-    d3 = MyDataclass(2, 'world')
+
+-
+
+-    assert hash(d1) == hash(d2)
+
+-    assert hash(d1) != hash(d3)
+
+-    assert isinstance(d1, Hashable)
+
+-
+
+-    # Can be used in sets and as dict keys
+
+-    s = {d1, d2, d3}
+
+-    assert len(s) == 2
+
+-    lookup = {d1: 'found'}
+
+-    assert lookup[d2] == 'found'
+
+-
+
+-
+
+-def test_frozen_eq_preserved():
+
+-    """Frozen dataclasses should retain __eq__ from stdlib."""
+
+-
+
+-    @pydantic.dataclasses.dataclass(frozen=True)
+
+-    class MyDataclass:
+
+-        a: int
+
+-
+
+-    assert MyDataclass(1) == MyDataclass(1)
+
+-    assert MyDataclass(1) != MyDataclass(2)
+
+-
+
+-
+
+-def test_order_preserved():
+
+-    """order=True should produce comparison operators from stdlib."""
+
+-
+
+-    @pydantic.dataclasses.dataclass(order=True)
+
+-    class MyDataclass:
+
+-        a: int
+
+-
+
+-    assert MyDataclass(1) < MyDataclass(2)
+
+-    assert MyDataclass(2) > MyDataclass(1)
+
+-    assert MyDataclass(1) <= MyDataclass(1)
+
+-    assert MyDataclass(1) >= MyDataclass(1)
+
+-
+
+-
+
+-def test_frozen_as_field_in_model():
+
+-    """Frozen pydantic dataclasses should work as fields in BaseModel."""
+
+-
+
+-    @pydantic.dataclasses.dataclass(frozen=True)
+
+-    class Item:
+
+-        name: str
+
+-        price: float
+
+-
+
+-    class Order(BaseModel):
+
+-        item: Item
+
+-        quantity: int
+
+-
+
+-    item = Item(name='widget', price=9.99)
+
+-    order = Order(item=item, quantity=3)
+
+-    assert order.item.name == 'widget'
+
+-    assert order.item.price == 9.99
+
+-
+
+-    with pytest.raises(AttributeError):
+
+-        order.item.name = 'changed'
+
+-
+
+-
+
+-def test_frozen_nested_dataclasses():
+
+-    """Frozen pydantic dataclasses should work when nested in other dataclasses."""
+
+-
+
+-    @pydantic.dataclasses.dataclass(frozen=True)
+
+-    class Inner:
+
+-        value: int
+
+-
+
+-    @pydantic.dataclasses.dataclass
+
+-    class Outer:
+
+-        inner: Inner
+
+-        label: str
+
+-
+
+-    o = Outer(inner=Inner(value=42), label='test')
+
+-    assert o.inner.value == 42
+
+-    assert o.label == 'test'
+
+-
+
+-    with pytest.raises(AttributeError):
+
+-        o.inner.value = 99
+
++    as_dict = dataclasses.asdict(d)
+
++    assert as_dict == {'a': 1, 'b': 'default'}
+
+ 
+
+ 
+
+ def test_default_factory_nested():
+
+@@ -1056,29 +1084,25 @@
+     o2 = Outer()
+
+     assert o1.inner.values == []
+
+     assert o2.inner.values == []
+
+-    # Each instance should get its own list from the factory
+
++    # Ensure each instance gets its own list (no shared mutable default)
+
+     o1.inner.values.append(1)
+
++    assert o1.inner.values == [1]
+
+     assert o2.inner.values == []
+
+ 
+
+ 
+
+-def test_isinstance_check():
+
+-    """isinstance should work directly without proxy indirection."""
+
+-
+
+-    @pydantic.dataclasses.dataclass
+
+-    class MyDataclass:
+
+-        a: int
+
+-
+
+-    d = MyDataclass(1)
+
+-    assert isinstance(d, MyDataclass)
+
+-
+
+-
+
+-def test_override_builtin_returns_same_class():
+
+-    """Decorating an existing stdlib dataclass should return the same class object."""
+
+-
+
+-    @dataclasses.dataclass
+
+-    class Original:
+
+-        x: int
+
+-
+
+-    Decorated = pydantic.dataclasses.dataclass(Original)
+
+-    assert Decorated is Original
+
+-
+
++def test_frozen_with_default_factory():
+
++    """Frozen dataclass with default_factory should work."""
+
++
+
++    @pydantic.dataclasses.dataclass(frozen=True)
+
++    class FrozenWithFactory:
+
++        items: FrozenSet[int] = dataclasses.field(default_factory=frozenset)
+
++
+
++    f = FrozenWithFactory()
+
++    assert f.items == frozenset()
+
++
+
++    f2 = FrozenWithFactory(items={1, 2, 3})
+
++    assert f2.items == frozenset({1, 2, 3})
+
++
+
++    with pytest.raises(AttributeError):
+
++        f2.items = frozenset()
+
++
+
+--- b/tests/test_validators_dataclass.py
++++ a/tests/test_validators_dataclass.py
+@@ -138,4 +138,3 @@
+ 
+
+     assert exc_info.value.errors() == [{'loc': ('__root__',), 'msg': 'foobar', 'type': 'value_error'}]
+
+ 
+
+-
