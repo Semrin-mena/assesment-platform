@@ -24,24 +24,24 @@ So now lets go with this approach and make sure that the test file is updated to
 // Fill these in with the full model text responses
 const RESPONSE_TEXT_A = `Response A Terminal:
 
-â— Read 3 files to understand the full picture (dataclasses.py, fields.py, schema.py).
+● Read 3 files to understand the full picture (dataclasses.py, fields.py, schema.py).
 
-â— Searched for all references to PydanticDataclass, ObjectProxy, and the wrapper module across the codebase.
+● Searched for all references to PydanticDataclass, ObjectProxy, and the wrapper module across the codebase.
 
-â— Now I have the full picture. Here's the plan:
+● Now I have the full picture. Here's the plan:
 
-  1. pydantic/dataclasses.py â€” Drop PydanticDataclass/ObjectProxy, return the class directly,
+  1. pydantic/dataclasses.py — Drop PydanticDataclass/ObjectProxy, return the class directly,
      always run validation (no more __pydantic_run_validation__ gating)
-  2. pydantic/fields.py â€” Replace isinstance(type_, PydanticDataclass) with a __pydantic_model__
+  2. pydantic/fields.py — Replace isinstance(type_, PydanticDataclass) with a __pydantic_model__
      attribute check
-  3. pydantic/schema.py â€” Replace isinstance(field.type_, PydanticDataclass) + __wrapped__ with
+  3. pydantic/schema.py — Replace isinstance(field.type_, PydanticDataclass) + __wrapped__ with
      __pydantic_model__ check
-  4. Tests â€” Fix proxy-related assertions
-  5. Example â€” Update dataclasses_stdlib_to_pydantic.py
+  4. Tests — Fix proxy-related assertions
+  5. Example — Update dataclasses_stdlib_to_pydantic.py
 
   Let me start with the core module.
 
-â— Update(pydantic/dataclasses.py) â€” Added 23 lines, removed 53 lines
+● Update(pydantic/dataclasses.py) — Added 23 lines, removed 53 lines
   (see response_A.diff: pydantic/dataclasses.py)
   - Rewrote module docstring
   - Removed \`from .wrapper import ObjectProxy\` and \`from functools import partial\`
@@ -51,134 +51,134 @@ const RESPONSE_TEXT_A = `Response A Terminal:
   - Removed PydanticDataclass class entirely
   - Simplified docstring on add_pydantic_validation_attributes: validation always runs
 
-â— Now update _validate_dataclass to remove the __pydantic_run_validation__ kwarg and update
+● Now update _validate_dataclass to remove the __pydantic_run_validation__ kwarg and update
   make_dataclass_validator:
 
-â— Update(pydantic/dataclasses.py) â€” Added 2 lines, removed 2 lines
+● Update(pydantic/dataclasses.py) — Added 2 lines, removed 2 lines
   (see response_A.diff: pydantic/dataclasses.py)
   - Removed __pydantic_run_validation__=True from cls(*v) and cls(**v) calls in _validate_dataclass
 
-â— Update(pydantic/dataclasses.py) â€” Added 2 lines, removed 1 line
+● Update(pydantic/dataclasses.py) — Added 2 lines, removed 1 line
   (see response_A.diff: pydantic/dataclasses.py)
   - make_dataclass_validator: replaced \`yield from _get_validators(PydanticDataclass(...))\` with
     \`add_pydantic_validation_attributes(dc_cls, config); yield from _get_validators(dc_cls)\`
 
-â— Now update fields.py and schema.py to remove PydanticDataclass references:
+● Now update fields.py and schema.py to remove PydanticDataclass references:
 
-â— Update(pydantic/fields.py) â€” Added 1 line, removed 2 lines
+● Update(pydantic/fields.py) — Added 1 line, removed 2 lines
   (see response_A.diff: pydantic/fields.py)
   - Removed \`from .dataclasses import PydanticDataclass\`
   - Replaced \`isinstance(self.type_, PydanticDataclass)\` with \`hasattr(self.type_, '__pydantic_model__')\`
 
-â— Update(pydantic/schema.py) â€” Removed 4 lines
+● Update(pydantic/schema.py) — Removed 4 lines
   (see response_A.diff: pydantic/schema.py)
   - Removed PydanticDataclass import and \`field.type_ = field.type_.__wrapped__\` unwrapping
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
-  âŽ¿  ..........F
+● Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
+  ⎿  ..........F
      FAILED tests/test_dataclasses.py::test_inheritance
 
-â— The issue is my is_dataclass guard skips processing for inherited dataclasses. Need to check if
+● The issue is my is_dataclass guard skips processing for inherited dataclasses. Need to check if
   the class is directly a dataclass:
 
-â— Update(pydantic/dataclasses.py) â€” Added 3 lines, removed 1 line
+● Update(pydantic/dataclasses.py) — Added 3 lines, removed 1 line
   (see response_A.diff: pydantic/dataclasses.py)
   - Replaced \`if not dataclasses.is_dataclass(cls):\` with \`if '__dataclass_fields__' not in cls.__dict__:\`
     to correctly handle inherited-but-not-directly-decorated dataclasses
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
-  âŽ¿  .................................F
+● Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
+  ⎿  .................................F
      FAILED tests/test_dataclasses.py::test_hashable_required
 
-â— The error message now includes the class name (Python 3.12 changed the format). Updated test to
+● The error message now includes the class name (Python 3.12 changed the format). Updated test to
   use \`in\` instead of \`==\`.
 
-â— Update(tests/test_dataclasses.py) â€” Added 1 line, removed 1 line
+● Update(tests/test_dataclasses.py) — Added 1 line, removed 1 line
   (see response_A.diff: tests/test_dataclasses.py)
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
-  âŽ¿  .......................................F
+● Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
+  ⎿  .......................................F
      FAILED tests/test_dataclasses.py::test_override_builtin_dataclass_nested
 
-â— The nested dataclass test needs updating because Meta(...) now validates immediately
+● The nested dataclass test needs updating because Meta(...) now validates immediately
   (always-on validation), so the error is raised during Meta construction before File validation
   even runs. Updated the test to reflect this properly:
 
-â— Update(tests/test_dataclasses.py) â€” Added 10 lines, removed 1 line
+● Update(tests/test_dataclasses.py) — Added 10 lines, removed 1 line
   (see response_A.diff: tests/test_dataclasses.py)
   - Split single assertion into two cases:
     1. Meta(...) constructed directly now raises at Meta level (loc: ('seen_count',))
     2. Passing a dict for meta still raises with nested path (loc: ('meta', 'seen_count'))
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
-  âŽ¿  ...............................................
+● Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
+  ⎿  ...............................................
      47 passed in 0.56s
 
-â— All 47 tests pass. Now add tests for the new behaviors â€” frozen support, dunder preservation,
+● All 47 tests pass. Now add tests for the new behaviors — frozen support, dunder preservation,
   nested dataclasses, and stdlib compatibility:
 
-â— Update(tests/test_dataclasses.py) â€” Added 175 lines
+● Update(tests/test_dataclasses.py) — Added 175 lines
   (see response_A.diff: tests/test_dataclasses.py)
   Added: test_decorator_returns_original_class, test_is_instance_after_decoration,
   test_frozen_hash_preserved, test_frozen_as_field_in_model, test_frozen_nested_dataclasses,
   test_eq_and_order_preserved, test_repr_preserved, test_stdlib_fields_and_asdict,
   test_default_factory_nested, test_frozen_with_default_factory
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
-  âŽ¿  .........................................................
+● Bash(python3 -m pytest tests/test_dataclasses.py -x -q)
+  ⎿  .........................................................
      57 passed in 0.56s
 
-â— All 57 tests pass (47 existing + 10 new). Now update the example file:
+● All 57 tests pass (47 existing + 10 new). Now update the example file:
 
-â— Update(docs/examples/dataclasses_stdlib_to_pydantic.py) â€” Added 12 lines
+● Update(docs/examples/dataclasses_stdlib_to_pydantic.py) — Added 12 lines
   (see response_A.diff: docs/examples/dataclasses_stdlib_to_pydantic.py)
   - Added comments explaining in-place augmentation
   - Added \`assert type(File) is type\`
   - Added \`dataclasses.asdict()\` call with expected output annotation
 
-â— Bash(python3 docs/examples/dataclasses_stdlib_to_pydantic.py)
-  âŽ¿  File(modified_date=datetime.datetime(2020, 1, 1, 0, 0), seen_count=7, filename='thefilename')
+● Bash(python3 docs/examples/dataclasses_stdlib_to_pydantic.py)
+  ⎿  File(modified_date=datetime.datetime(2020, 1, 1, 0, 0), seen_count=7, filename='thefilename')
      {'modified_date': datetime.datetime(2020, 1, 1, 0, 0), 'seen_count': 7, 'filename': 'thefilename'}
      1 validation error for File
      ...
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -x -q)
-  âŽ¿  Error: Exit code 1
+● Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -x -q)
+  ⎿  Error: Exit code 1
      FAILED tests/test_validators_dataclass.py::test_classmethod
 
-â— The validator test references __wrapped__ from the old proxy. Since there's no proxy anymore,
+● The validator test references __wrapped__ from the old proxy. Since there's no proxy anymore,
   cls IS MyDataclass directly:
 
-â— Update(tests/test_validators_dataclass.py) â€” Added 1 line, removed 1 line
+● Update(tests/test_validators_dataclass.py) — Added 1 line, removed 1 line
   (see response_A.diff: tests/test_validators_dataclass.py)
   - Changed \`cls is MyDataclass.__wrapped__\` to \`cls is MyDataclass\`
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -x -q)
-  âŽ¿  .................................................................
+● Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -x -q)
+  ⎿  .................................................................
      64 passed in 0.30s
 
-â— All 64 tests pass. Let me also run the full test suite to check for broader regressions:
+● All 64 tests pass. Let me also run the full test suite to check for broader regressions:
 
-â— Bash(python3 -m pytest tests/ -q --ignore=tests/test_abc.py | tail -20)
-  âŽ¿  4 failures in test_annotated_types, test_generics, test_main (unrelated to dataclasses)
+● Bash(python3 -m pytest tests/ -q --ignore=tests/test_abc.py | tail -20)
+  ⎿  4 failures in test_annotated_types, test_generics, test_main (unrelated to dataclasses)
 
-â— Bash(git stash && python3 -m pytest [those 4 failing tests])
-  âŽ¿  All 4 failures are pre-existing on the original code too. Our changes introduce zero regressions.
+● Bash(git stash && python3 -m pytest [those 4 failing tests])
+  ⎿  All 4 failures are pre-existing on the original code too. Our changes introduce zero regressions.
 `;
 const RESPONSE_TEXT_B = `Response B Terminal:
 
-â— Read the test file and example file to understand what needs to change.
+● Read the test file and example file to understand what needs to change.
 
-â— Read __init__.py to check exports and understand the full picture.
+● Read __init__.py to check exports and understand the full picture.
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short | tail -40)
-  âŽ¿  46 pass, 1 pre-existing failure (Python 3.12 error message format difference in
+● Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short | tail -40)
+  ⎿  46 pass, 1 pre-existing failure (Python 3.12 error message format difference in
      test_hashable_required). Now I have full context.
 
   The approach: dataclass() returns the original class directly (not a PydanticDataclass proxy).
   Validation is attached by augmenting __init__ in place on the class itself.
 
-â— Update(pydantic/dataclasses.py) â€” Added 16 lines, removed 39 lines
+● Update(pydantic/dataclasses.py) — Added 16 lines, removed 39 lines
   (see response_B.diff: pydantic/dataclasses.py)
   - Rewrote module docstring
   - Removed \`from .wrapper import ObjectProxy\` and \`from functools import partial\`
@@ -188,27 +188,27 @@ const RESPONSE_TEXT_B = `Response B Terminal:
   - Removed PydanticDataclass class entirely
   - make_dataclass_validator: replaced PydanticDataclass(...) with add_pydantic_validation_attributes + yield
 
-â— Now update add_pydantic_validation_attributes â€” the __init__ wrapping needs to run validation by
+● Now update add_pydantic_validation_attributes — the __init__ wrapping needs to run validation by
   default (since there's no proxy to inject the kwarg):
 
   When stdlib dataclass has __post_init__, its generated __init__ calls self.__post_init__()
   internally. Since we now default __pydantic_run_validation__ to True, the __post_init__ wrapper
   will always validate when called normally. The current code is correct.
 
-â— Update(pydantic/dataclasses.py) â€” Added 3 lines, removed 12 lines
+● Update(pydantic/dataclasses.py) — Added 3 lines, removed 12 lines
   - Changed __pydantic_run_validation__ default from False to True in both new_post_init and new_init
   - Removed the partial() trick that used to inject the kwarg through __init__
   - Removed the separate new_init wrapper for the __post_init__ path (only __post_init__ is wrapped)
   - Updated docstring to reflect new default
 
-â— Update(pydantic/dataclasses.py) â€” Added 2 lines, removed 2 lines
+● Update(pydantic/dataclasses.py) — Added 2 lines, removed 2 lines
   - Removed __pydantic_run_validation__=True from cls(*v) and cls(**v) in _validate_dataclass
     (now redundant since default is True)
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short)
-  âŽ¿  ..........F  FAILED tests/test_dataclasses.py::test_inheritance
+● Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short)
+  ⎿  ..........F  FAILED tests/test_dataclasses.py::test_inheritance
 
-â— The problem: ParentDataclass gets pydantic-decorated (making it a stdlib dataclass), then
+● The problem: ParentDataclass gets pydantic-decorated (making it a stdlib dataclass), then
   MyDataclass(ParentDataclass) inherits it, so dataclasses.is_dataclass(MyDataclass) returns True
   via inheritance. My guard skips the dataclasses.dataclass() call, so MyDataclass never gets its
   own __init__ with field b.
@@ -216,38 +216,38 @@ const RESPONSE_TEXT_B = `Response B Terminal:
   Fix: check if the class itself was processed (has __dataclass_fields__ as its own attribute),
   not just inherited:
 
-â— Update(pydantic/dataclasses.py) â€” Added 4 lines, removed 1 line
+● Update(pydantic/dataclasses.py) — Added 4 lines, removed 1 line
   - Replaced \`if not dataclasses.is_dataclass(cls):\` with
     \`is_own_dataclass = '__dataclass_fields__' in cls.__dict__; if not is_own_dataclass:\`
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short)
-  âŽ¿  ........................F
+● Bash(python3 -m pytest tests/test_dataclasses.py -x --tb=short)
+  ⎿  ........................F
      References to PydanticDataclass still exist in fields.py and schema.py.
 
-â— Read fields.py and schema.py to find usages.
+● Read fields.py and schema.py to find usages.
 
-â— These checks were using isinstance(x, PydanticDataclass) to detect pydantic-processed dataclasses.
+● These checks were using isinstance(x, PydanticDataclass) to detect pydantic-processed dataclasses.
   Replace with hasattr(..., '__pydantic_model__') check (which add_pydantic_validation_attributes
   already sets on the class).
 
-â— Update(pydantic/fields.py) â€” Added 1 line, removed 2 lines
+● Update(pydantic/fields.py) — Added 1 line, removed 2 lines
   (see response_B.diff: pydantic/fields.py)
   - Removed \`from .dataclasses import PydanticDataclass\`
   - Replaced \`isinstance(self.type_, PydanticDataclass)\` with \`hasattr(self.type_, '__pydantic_model__')\`
 
-â— Update(pydantic/schema.py) â€” Removed 4 lines
+● Update(pydantic/schema.py) — Removed 4 lines
   (see response_B.diff: pydantic/schema.py)
   - Removed PydanticDataclass import and \`field.type_ = field.type_.__wrapped__\` unwrapping
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
-  âŽ¿  .......................................F......
-     FAILED: test_override_builtin_dataclass_nested â€” error loc is ('seen_count',) not
+● Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
+  ⎿  .......................................F......
+     FAILED: test_override_builtin_dataclass_nested — error loc is ('seen_count',) not
      ('meta', 'seen_count')
 
-â— The error loc is ('seen_count',) because make_dataclass_validator now calls
+● The error loc is ('seen_count',) because make_dataclass_validator now calls
   add_pydantic_validation_attributes on Meta, which changes Meta.__init__ to validate by default
   (True). So Meta(seen_count=['7']) raises immediately during construction, before FileChecked
-  even runs â€” the nested path prefix never gets added.
+  even runs — the nested path prefix never gets added.
 
   With the old proxy approach, Meta.__init__ defaulted to __pydantic_run_validation__=False, so
   plain Meta(...) calls would not validate unless the proxy was involved.
@@ -255,74 +255,74 @@ const RESPONSE_TEXT_B = `Response B Terminal:
   I need to keep the default as False when called from make_dataclass_validator (for builtin
   dataclasses used as field types), but True when called from the @dataclass decorator.
 
-â— Update(pydantic/dataclasses.py) â€” Added 1 line, removed 1 line
+● Update(pydantic/dataclasses.py) — Added 1 line, removed 1 line
   - Pass validate_by_default=True from the @dataclass decorator call
 
-â— Update(pydantic/dataclasses.py) â€” Added 11 lines, removed 3 lines
+● Update(pydantic/dataclasses.py) — Added 11 lines, removed 3 lines
   - Added validate_by_default: bool = False parameter to add_pydantic_validation_attributes
   - Stored as _default_validate and used as the default for __pydantic_run_validation__ in both
     new_post_init and new_init
   - Updated docstring: True = always validates (@dataclass path), False = opt-in via kwarg
     (make_dataclass_validator path)
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
-  âŽ¿  .......................................F......
-     First assertion now passes but Foo.parse_obj() path fails â€” Meta created via dict parsing is
+● Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
+  ⎿  .......................................F......
+     First assertion now passes but Foo.parse_obj() path fails — Meta created via dict parsing is
      unvalidated because make_dataclass_validator uses validate_by_default=False, so cls(**v)
      does not validate.
 
   Fix: _validate_dataclass is the validation entry point, it should always explicitly pass True:
 
-â— Update(pydantic/dataclasses.py) â€” Added 2 lines, removed 2 lines
+● Update(pydantic/dataclasses.py) — Added 2 lines, removed 2 lines
   (see response_B.diff: pydantic/dataclasses.py)
   - Re-added __pydantic_run_validation__=True to cls(*v) and cls(**v) in _validate_dataclass
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
-  âŽ¿  47 passed
+● Bash(python3 -m pytest tests/test_dataclasses.py --tb=short)
+  ⎿  47 passed
 
-â— Bash(python3 -m pytest tests/test_validators_dataclass.py --tb=short)
-  âŽ¿  ...F...  FAILED test_classmethod â€” asserts \`cls is MyDataclass.__wrapped__\`
+● Bash(python3 -m pytest tests/test_validators_dataclass.py --tb=short)
+  ⎿  ...F...  FAILED test_classmethod — asserts \`cls is MyDataclass.__wrapped__\`
 
-â— No proxy anymore, so cls IS MyDataclass directly:
+● No proxy anymore, so cls IS MyDataclass directly:
 
-â— Update(tests/test_validators_dataclass.py) â€” Added 1 line, removed 1 line
+● Update(tests/test_validators_dataclass.py) — Added 1 line, removed 1 line
   (see response_B.diff: tests/test_validators_dataclass.py)
   - Changed \`cls is MyDataclass.__wrapped__\` to \`cls is MyDataclass\`
 
-â— Also fix the pre-existing test_hashable_required Python 3.12 failure:
+● Also fix the pre-existing test_hashable_required Python 3.12 failure:
 
-â— Update(tests/test_dataclasses.py) â€” Added 1 line, removed 1 line
+● Update(tests/test_dataclasses.py) — Added 1 line, removed 1 line
   - Changed \`==\` to \`in\` for the error message string check
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py --tb=short)
-  âŽ¿  54 passed
+● Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py --tb=short)
+  ⎿  54 passed
 
-â— Bash(python3 -m pytest tests/ --tb=short | tail -30)
-  âŽ¿  Several failures â€” checked with git stash that all are pre-existing on the base commit.
+● Bash(python3 -m pytest tests/ --tb=short | tail -30)
+  ⎿  Several failures — checked with git stash that all are pre-existing on the base commit.
      Our changes introduce zero regressions.
 
-â— Now update the example file and add tests for the new behaviors:
+● Now update the example file and add tests for the new behaviors:
 
-â— Update(docs/examples/dataclasses_stdlib_to_pydantic.py) â€” Added 6 lines
+● Update(docs/examples/dataclasses_stdlib_to_pydantic.py) — Added 6 lines
   (see response_B.diff: docs/examples/dataclasses_stdlib_to_pydantic.py)
   - Added comments explaining in-place augmentation approach
   - Added \`assert dataclasses.is_dataclass(File)\`
 
-â— Update(tests/test_dataclasses.py) â€” Added 160 lines
+● Update(tests/test_dataclasses.py) — Added 160 lines
   (see response_B.diff: tests/test_dataclasses.py)
   Added: test_decorator_returns_same_class, test_stdlib_compat_after_decoration,
   test_frozen_hash_preserved, test_frozen_eq_preserved, test_order_preserved,
   test_frozen_as_field_in_model, test_frozen_nested_dataclasses, test_default_factory_nested,
   test_isinstance_check, test_override_builtin_returns_same_class
 
-â— Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -v)
-  âŽ¿  64 passed
+● Bash(python3 -m pytest tests/test_dataclasses.py tests/test_validators_dataclass.py -v)
+  ⎿  64 passed
 
-â— Update(dataclass_design_analysis.md) â€” Added 29 lines, removed 61 lines
+● Update(dataclass_design_analysis.md) — Added 29 lines, removed 61 lines
   - Updated recommendation section to reflect the chosen in-place augmentation approach
   - Documented the validate_by_default parameter and what changed vs the old proxy design
 
-â— All 64 tests pass. Summary:
+● All 64 tests pass. Summary:
   - Removed PydanticDataclass(ObjectProxy) proxy entirely
   - dataclass() returns the original class directly
   - add_pydantic_validation_attributes() gains validate_by_default parameter (True from @dataclass,
@@ -353,25 +353,19 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 @@ -17,13 +17,14 @@
      filename: str
 
- 
-
- 
-
 -# pydantic.dataclasses.dataclass augments the class in place and returns
 
--# the same class â€” no proxy, no wrapper.  All stdlib behaviors (frozen,
+-# the same class — no proxy, no wrapper.  All stdlib behaviors (frozen,
 
 -# dunder methods, dataclasses.fields(), etc.) are preserved.
 
 +# Augment the existing stdlib dataclass in place with pydantic validation.
 
-+# The returned class is the same class object â€” all stdlib behaviors
++# The returned class is the same class object — all stdlib behaviors
 
 +# (__hash__, __eq__, __repr__, dataclasses.fields(), etc.) are preserved.
 
  File = pydantic.dataclasses.dataclass(File)
-
- 
 
 -# The decorated class *is* the original class:
 
@@ -381,9 +375,7 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +assert type(File) is type
 
- 
-
- file = File(
+file = File(
 
      filename=b'thefilename',
 
@@ -404,9 +396,7 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +# > {'filename': 'thefilename', 'modified_date': datetime.datetime(2020, 1, 1, 0, 0), 'seen_count': 7}
 
- 
-
- try:
+try:
 
      File(
 
@@ -414,8 +404,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
  except pydantic.ValidationError as e:
 
      print(e)
-
- 
 
 -
 
@@ -430,7 +418,7 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 -
 
--The decorator augments the original class in place â€” it attaches pydantic validation
+-The decorator augments the original class in place — it attaches pydantic validation
 
 -logic directly to the class and returns the same class. This means there is only one
 
@@ -459,8 +447,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          import dataclasses
 
- 
-
 -        # Only skip dataclasses.dataclass() if the class itself (not a parent) was
 
 -        # already processed as a stdlib dataclass.
@@ -487,16 +473,10 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          return cls
 
- 
-
-     if _cls is None:
+if _cls is None:
 
 @@ -114,43 +112,37 @@
      return wrap(_cls)
-
- 
-
- 
 
 -def add_pydantic_validation_attributes(
 
@@ -538,8 +518,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          post_init = dc_cls.__post_init__
 
- 
-
 +        @wraps(init)
 
 +        def new_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
@@ -570,21 +548,15 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
                  self.__post_init_post_parse__(*args, **kwargs)
 
- 
-
 +        setattr(dc_cls, '__init__', new_init)
 
          setattr(dc_cls, '__post_init__', new_post_init)
 
- 
-
-     else:
+else:
 
          init = dc_cls.__init__
 
- 
-
-         @wraps(init)
+@wraps(init)
 
 -        def new_init(self: 'Dataclass', *args: Any, __pydantic_run_validation__: bool = _default_validate, **kwargs: Any) -> None:
 
@@ -625,8 +597,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          raise DataclassTypeError(class_name=cls.__name__)
 
- 
-
 --- b/pydantic/schema.py
 +++ a/pydantic/schema.py
 @@ -1,4 +1,3 @@
@@ -644,8 +614,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
      assert f.meta.modified_date == datetime(2020, 1, 1, 0, 0)
 
      assert f.meta.seen_count == 7
-
- 
 
 +    # Meta now always validates on construction, so passing invalid data to Meta
 
@@ -680,10 +648,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 @@ -923,122 +932,141 @@
      }
 
- 
-
- 
-
 -def test_decorator_returns_same_class():
 
 -    """The pydantic dataclass decorator should return the original class, not a proxy."""
@@ -692,17 +656,13 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +    """The decorator should return the original class, not a proxy."""
 
- 
-
-     @pydantic.dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 
      class MyDataclass:
 
          a: int
 
- 
-
-     assert type(MyDataclass) is type
+assert type(MyDataclass) is type
 
 +    assert isinstance(MyDataclass, type)
 
@@ -711,8 +671,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 -    assert hasattr(MyDataclass, '__dataclass_fields__')
 
 -    assert hasattr(MyDataclass, '__pydantic_model__')
-
--
 
 -
 
@@ -733,8 +691,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 -
 
 -    fields = dataclasses.fields(MyDataclass)
-
-+
 
 +
 
@@ -978,8 +934,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
      assert fields[1].name == 'b'
 
- 
-
 -    d = MyDataclass(a=1, b='world')
 
 -    assert dataclasses.asdict(d) == {'a': 1, 'b': 'world'}
@@ -1164,11 +1118,7 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +    assert as_dict == {'a': 1, 'b': 'default'}
 
- 
-
- 
-
- def test_default_factory_nested():
+def test_default_factory_nested():
 
 @@ -1056,29 +1084,25 @@
      o2 = Outer()
@@ -1186,10 +1136,6 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 +    assert o1.inner.values == [1]
 
      assert o2.inner.values == []
-
- 
-
- 
 
 -def test_isinstance_check():
 
@@ -1268,11 +1214,8 @@ const DIFF_A = `--- b/docs/examples/dataclasses_stdlib_to_pydantic.py
 --- b/tests/test_validators_dataclass.py
 +++ a/tests/test_validators_dataclass.py
 @@ -138,4 +138,3 @@
- 
 
-     assert exc_info.value.errors() == [{'loc': ('__root__',), 'msg': 'foobar', 'type': 'value_error'}]
-
- 
+assert exc_info.value.errors() == [{'loc': ('__root__',), 'msg': 'foobar', 'type': 'value_error'}]
 
 -
 `;
@@ -1282,25 +1225,19 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 @@ -17,14 +17,13 @@
      filename: str
 
- 
-
- 
-
 -# Augment the existing stdlib dataclass in place with pydantic validation.
 
--# The returned class is the same class object â€” all stdlib behaviors
+-# The returned class is the same class object — all stdlib behaviors
 
 -# (__hash__, __eq__, __repr__, dataclasses.fields(), etc.) are preserved.
 
 +# pydantic.dataclasses.dataclass augments the class in place and returns
 
-+# the same class â€” no proxy, no wrapper.  All stdlib behaviors (frozen,
++# the same class — no proxy, no wrapper.  All stdlib behaviors (frozen,
 
 +# dunder methods, dataclasses.fields(), etc.) are preserved.
 
  File = pydantic.dataclasses.dataclass(File)
-
- 
 
 -# The class is still a real stdlib dataclass:
 
@@ -1310,9 +1247,7 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 -assert type(File) is type
 
- 
-
- file = File(
+file = File(
 
      filename=b'thefilename',
 
@@ -1333,9 +1268,7 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 -# > {'filename': 'thefilename', 'modified_date': datetime.datetime(2020, 1, 1, 0, 0), 'seen_count': 7}
 
- 
-
- try:
+try:
 
      File(
 
@@ -1343,8 +1276,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
  except pydantic.ValidationError as e:
 
      print(e)
-
- 
 
 +
 
@@ -1369,7 +1300,7 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +
 
-+The decorator augments the original class in place â€” it attaches pydantic validation
++The decorator augments the original class in place — it attaches pydantic validation
 
 +logic directly to the class and returns the same class. This means there is only one
 
@@ -1387,8 +1318,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
      def wrap(cls: Type[Any]) -> Type[Any]:
 
          import dataclasses
-
- 
 
 -        # Only call dataclasses.dataclass() if the class hasn't been directly decorated yet.
 
@@ -1416,16 +1345,10 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          return cls
 
- 
-
-     if _cls is None:
+if _cls is None:
 
 @@ -112,37 +114,43 @@
      return wrap(_cls)
-
- 
-
- 
 
 -def add_pydantic_validation_attributes(dc_cls: Type['Dataclass'], config: Optional[Type['BaseConfig']]) -> None:
 
@@ -1467,8 +1390,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          post_init = dc_cls.__post_init__
 
- 
-
 -        @wraps(init)
 
 -        def new_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
@@ -1499,21 +1420,15 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
                  self.__post_init_post_parse__(*args, **kwargs)
 
- 
-
 -        setattr(dc_cls, '__init__', new_init)
 
          setattr(dc_cls, '__post_init__', new_post_init)
 
- 
-
-     else:
+else:
 
          init = dc_cls.__init__
 
- 
-
-         @wraps(init)
+@wraps(init)
 
 -        def new_init(self: 'Dataclass', *args: Any, **kwargs: Any) -> None:
 
@@ -1554,8 +1469,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
          raise DataclassTypeError(class_name=cls.__name__)
 
- 
-
 --- a/pydantic/schema.py
 +++ b/pydantic/schema.py
 @@ -1,3 +1,4 @@
@@ -1573,8 +1486,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
      assert f.meta.modified_date == datetime(2020, 1, 1, 0, 0)
 
      assert f.meta.seen_count == 7
-
- 
 
 -    # Meta now always validates on construction, so passing invalid data to Meta
 
@@ -1609,10 +1520,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 @@ -932,27 +923,34 @@
      }
 
- 
-
- 
-
 -def test_decorator_returns_original_class():
 
 -    """The decorator should return the original class, not a proxy."""
@@ -1621,17 +1528,13 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +    """The pydantic dataclass decorator should return the original class, not a proxy."""
 
- 
-
-     @pydantic.dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 
      class MyDataclass:
 
          a: int
 
- 
-
-     assert type(MyDataclass) is type
+assert type(MyDataclass) is type
 
 -    assert isinstance(MyDataclass, type)
 
@@ -1697,16 +1600,11 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +    assert dataclasses.asdict(d) == {'a': 1, 'b': 'world'}
 
- 
-
- 
-
- def test_frozen_hash_preserved():
+def test_frozen_hash_preserved():
 
 @@ -969,104 +967,78 @@
- 
 
-     assert hash(d1) == hash(d2)
+assert hash(d1) == hash(d2)
 
      assert hash(d1) != hash(d3)
 
@@ -1784,17 +1682,11 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +    assert MyDataclass(1) >= MyDataclass(1)
 
- 
-
- 
-
- def test_frozen_as_field_in_model():
+def test_frozen_as_field_in_model():
 
      """Frozen pydantic dataclasses should work as fields in BaseModel."""
 
- 
-
-     @pydantic.dataclasses.dataclass(frozen=True)
+@pydantic.dataclasses.dataclass(frozen=True)
 
 -    class FrozenItem:
 
@@ -1852,19 +1744,13 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +        order.item.name = 'changed'
 
- 
-
- 
-
- def test_frozen_nested_dataclasses():
+def test_frozen_nested_dataclasses():
 
 -    """Frozen pydantic dataclasses nested inside other pydantic dataclasses."""
 
 +    """Frozen pydantic dataclasses should work when nested in other dataclasses."""
 
- 
-
-     @pydantic.dataclasses.dataclass(frozen=True)
+@pydantic.dataclasses.dataclass(frozen=True)
 
      class Inner:
 
@@ -1872,9 +1758,7 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +        value: int
 
- 
-
-     @pydantic.dataclasses.dataclass
+@pydantic.dataclasses.dataclass
 
      class Outer:
 
@@ -2012,11 +1896,7 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 
 +        o.inner.value = 99
 
- 
-
- 
-
- def test_default_factory_nested():
+def test_default_factory_nested():
 
 @@ -1084,25 +1056,29 @@
      o2 = Outer()
@@ -2034,10 +1914,6 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 -    assert o1.inner.values == [1]
 
      assert o2.inner.values == []
-
- 
-
- 
 
 -def test_frozen_with_default_factory():
 
@@ -2116,11 +1992,8 @@ const DIFF_B = `--- a/docs/examples/dataclasses_stdlib_to_pydantic.py
 --- a/tests/test_validators_dataclass.py
 +++ b/tests/test_validators_dataclass.py
 @@ -138,3 +138,4 @@
- 
 
-     assert exc_info.value.errors() == [{'loc': ('__root__',), 'msg': 'foobar', 'type': 'value_error'}]
-
- 
+assert exc_info.value.errors() == [{'loc': ('__root__',), 'msg': 'foobar', 'type': 'value_error'}]
 
 +
 `;

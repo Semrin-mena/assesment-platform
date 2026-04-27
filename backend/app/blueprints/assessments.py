@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth
+from app.pagination import get_page_params, paginated
 
 bp = Blueprint("assessments", __name__, url_prefix="/api/assessments")
 
@@ -50,8 +51,11 @@ def create_assessment():
 @require_auth
 def list_assessments():
     # Taskers only see their own assessments
-    assessments = models.list_assessments(user_id=g.user["id"])
-    return jsonify(assessments)
+    limit, offset = get_page_params()
+    user_id = g.user["id"]
+    items = models.list_assessments(user_id=user_id, limit=limit, offset=offset)
+    total = models.count_assessments(user_id=user_id)
+    return jsonify(paginated(items, total, limit, offset))
 
 
 @bp.route("/<int:assessment_id>", methods=["GET"])

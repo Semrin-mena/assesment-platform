@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth, require_admin
+from app.pagination import get_page_params, get_search_query, paginated
 
 bp = Blueprint("marlin", __name__, url_prefix="/api/marlin")
 
@@ -29,8 +30,12 @@ def create_marlin_test():
 @bp.route("", methods=["GET"])
 @require_auth
 def list_marlin_tests():
-    tests = models.list_marlin_tests(user_id=g.user["id"])
-    return jsonify(tests)
+    limit, offset = get_page_params()
+    q = get_search_query()
+    user_id = g.user["id"]
+    items = models.list_marlin_tests(user_id=user_id, limit=limit, offset=offset, q=q)
+    total = models.count_marlin_tests(user_id=user_id, q=q)
+    return jsonify(paginated(items, total, limit, offset))
 
 
 @bp.route("/<int:test_id>", methods=["GET"])
@@ -51,5 +56,8 @@ def get_marlin_test(test_id):
 @bp.route("/admin/all", methods=["GET"])
 @require_admin
 def admin_list_marlin_tests():
-    tests = models.list_marlin_tests(user_id=None)
-    return jsonify(tests)
+    limit, offset = get_page_params()
+    q = get_search_query()
+    items = models.list_marlin_tests(user_id=None, limit=limit, offset=offset, q=q)
+    total = models.count_marlin_tests(user_id=None, q=q)
+    return jsonify(paginated(items, total, limit, offset))

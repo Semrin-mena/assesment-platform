@@ -60,3 +60,20 @@ def require_admin(f):
         g.user = user
         return f(*args, **kwargs)
     return wrapper
+
+
+def require_reviewer(f):
+    """Decorator that requires the user to be a reviewer.
+
+    Admins do NOT pass this gate — review work is reviewer-only by spec.
+    """
+    @functools.wraps(f)
+    def wrapper(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            return jsonify({"error": "Authentication required"}), 401
+        if user["role"] != "reviewer":
+            return jsonify({"error": "Reviewer access required"}), 403
+        g.user = user
+        return f(*args, **kwargs)
+    return wrapper

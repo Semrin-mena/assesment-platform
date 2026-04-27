@@ -5,6 +5,16 @@ function getToken(): string | null {
   return localStorage.getItem("token");
 }
 
+function withPageParams(path: string, params?: { limit?: number; offset?: number; q?: string }): string {
+  if (!params) return path;
+  const qs = new URLSearchParams();
+  if (params.limit != null) qs.set("limit", String(params.limit));
+  if (params.offset != null) qs.set("offset", String(params.offset));
+  if (params.q != null && params.q.length > 0) qs.set("q", params.q);
+  const s = qs.toString();
+  return s ? `${path}?${s}` : path;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -58,7 +68,7 @@ export async function getMe(): Promise<User> {
 
 // --- Prompts ---
 
-import type { Prompt, GenerationResult } from "@/types";
+import type { Prompt, GenerationResult, Paginated, PageParams } from "@/types";
 
 export async function submitPrompt(promptText: string): Promise<GenerationResult> {
   return request<GenerationResult>("/api/prompts", {
@@ -67,8 +77,8 @@ export async function submitPrompt(promptText: string): Promise<GenerationResult
   });
 }
 
-export async function listPrompts(): Promise<Prompt[]> {
-  return request<Prompt[]>("/api/prompts");
+export async function listPrompts(params?: PageParams): Promise<Paginated<Prompt>> {
+  return request<Paginated<Prompt>>(withPageParams("/api/prompts", params));
 }
 
 // --- Assessments ---
@@ -108,16 +118,16 @@ export async function submitMarlinTest(
   });
 }
 
-export async function listMarlinTests(): Promise<MarlinTest[]> {
-  return request<MarlinTest[]>("/api/marlin");
+export async function listMarlinTests(params?: PageParams): Promise<Paginated<MarlinTest>> {
+  return request<Paginated<MarlinTest>>(withPageParams("/api/marlin", params));
 }
 
 export async function getMarlinTest(id: number): Promise<MarlinTest> {
   return request<MarlinTest>(`/api/marlin/${id}`);
 }
 
-export async function adminListMarlinTests(): Promise<MarlinTest[]> {
-  return request<MarlinTest[]>("/api/marlin/admin/all");
+export async function adminListMarlinTests(params?: PageParams): Promise<Paginated<MarlinTest>> {
+  return request<Paginated<MarlinTest>>(withPageParams("/api/marlin/admin/all", params));
 }
 
 // --- Admin ---
@@ -128,8 +138,8 @@ export async function adminGetStats(): Promise<AdminStats> {
   return request<AdminStats>("/api/admin/stats");
 }
 
-export async function adminListSubmissions(): Promise<Prompt[]> {
-  return request<Prompt[]>("/api/admin/submissions");
+export async function adminListSubmissions(params?: PageParams): Promise<Paginated<Prompt>> {
+  return request<Paginated<Prompt>>(withPageParams("/api/admin/submissions", params));
 }
 
 export async function adminGetSubmission(promptId: number): Promise<{
@@ -143,6 +153,70 @@ export async function adminGetSubmission(promptId: number): Promise<{
   return request(`/api/admin/submissions/${promptId}`);
 }
 
-export async function adminListUsers(): Promise<User[]> {
-  return request<User[]>("/api/admin/users");
+export async function adminListUsers(params?: PageParams): Promise<Paginated<User>> {
+  return request<Paginated<User>>(withPageParams("/api/admin/users", params));
+}
+
+export async function adminCreateUser(payload: {
+  username: string;
+  email: string;
+  password: string;
+  role: User["role"];
+}): Promise<User> {
+  return request<User>("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminUpdateUser(
+  userId: number,
+  payload: Partial<{ username: string; email: string; role: User["role"]; password: string }>
+): Promise<User> {
+  return request<User>(`/api/admin/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminDeleteUser(userId: number): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/api/admin/users/${userId}`, { method: "DELETE" });
+}
+
+// --- Reviews ---
+
+import type {
+  ReviewQueueItem,
+  MarlinReviewDetail,
+  MarlinReview,
+  MarlinQuestionScore,
+} from "@/types";
+
+export async function reviewerQueue(
+  status: "pending" | "reviewed",
+  params?: PageParams
+): Promise<Paginated<ReviewQueueItem>> {
+  const qs = new URLSearchParams();
+  qs.set("status", status);
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  if (params?.q) qs.set("q", params.q);
+  return request<Paginated<ReviewQueueItem>>(`/api/reviews/queue?${qs.toString()}`);
+}
+
+export async function reviewerGetMarlin(testId: number): Promise<MarlinReviewDetail> {
+  return request<MarlinReviewDetail>(`/api/reviews/marlin/${testId}`);
+}
+
+export async function reviewerSaveMarlin(
+  testId: number,
+  payload: {
+    scores: { question_key: string; override_score: number | null; notes: string | null }[];
+    submit?: boolean;
+  }
+): Promise<{ review: MarlinReview; scores: MarlinQuestionScore[] }> {
+  return request<{ review: MarlinReview; scores: MarlinQuestionScore[] }>(
+    `/api/reviews/marlin/${testId}`,
+    { method: "PUT", body: JSON.stringify(payload) }
+  );
 }

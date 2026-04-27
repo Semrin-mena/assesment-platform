@@ -3,6 +3,7 @@ from flask_cors import CORS
 
 from app.config import Config
 from app.extensions import close_db, init_db
+from app.migrations import run_migrations
 
 
 def create_app():
@@ -19,13 +20,15 @@ def create_app():
 
     # Initialize the database
     init_db(app)
+    run_migrations(app)
 
     # Register blueprints
-    from app.blueprints import auth, prompts, assessments, admin, marlin
+    from app.blueprints import auth, prompts, assessments, admin, marlin, reviews
     app.register_blueprint(auth.bp)
     app.register_blueprint(prompts.bp)
     app.register_blueprint(assessments.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(marlin.bp)
+    app.register_blueprint(reviews.bp)
 
     return app

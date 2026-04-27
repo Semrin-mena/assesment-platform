@@ -1,66 +1,99 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth-context";
-import { adminGetStats, adminListSubmissions, adminListUsers, adminListMarlinTests } from "@/lib/api";
+import { adminGetStats, adminListSubmissions, adminListUsers, adminListMarlinTests, adminDeleteUser } from "@/lib/api";
 import type { AdminStats, Prompt, User, MarlinTest } from "@/types";
+import Pagination from "@/components/Pagination";
+import UserFormModal from "@/components/UserFormModal";
 
 type Tab = "marlin" | "submissions" | "users";
+
+const PAGE_SIZE = 20;
 
 export default function AdminPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<AdminStats | null>(null);
+
   const [submissions, setSubmissions] = useState<Prompt[]>([]);
+  const [submissionsTotal, setSubmissionsTotal] = useState(0);
+  const [submissionsOffset, setSubmissionsOffset] = useState(0);
+
   const [marlinTests, setMarlinTests] = useState<MarlinTest[]>([]);
+  const [marlinTotal, setMarlinTotal] = useState(0);
+  const [marlinOffset, setMarlinOffset] = useState(0);
+
   const [users, setUsers] = useState<User[]>([]);
+  const [usersTotal, setUsersTotal] = useState(0);
+  const [usersOffset, setUsersOffset] = useState(0);
+
   const [tab, setTab] = useState<Tab>("marlin");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const [userModal, setUserModal] = useState<{ mode: "create" | "edit"; user?: User } | null>(null);
+
+  const loadMarlin = useCallback((offset: number, q: string) => {
+    return adminListMarlinTests({ limit: PAGE_SIZE, offset, q })
+      .then((res) => {
+        setMarlinTests(res.items);
+        setMarlinTotal(res.total);
+        setMarlinOffset(res.offset);
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const loadSubmissions = useCallback((offset: number, q: string) => {
+    return adminListSubmissions({ limit: PAGE_SIZE, offset, q })
+      .then((res) => {
+        setSubmissions(res.items);
+        setSubmissionsTotal(res.total);
+        setSubmissionsOffset(res.offset);
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const loadUsers = useCallback((offset: number, q: string) => {
+    return adminListUsers({ limit: PAGE_SIZE, offset, q })
+      .then((res) => {
+        setUsers(res.items);
+        setUsersTotal(res.total);
+        setUsersOffset(res.offset);
+      })
+      .catch((err) => setError(err.message));
+  }, []);
+
+  const handleDeleteUser = useCallback(async (target: User) => {
+    if (!confirm(`Delete ${target.username}? This cannot be undone.`)) return;
+    try {
+      await adminDeleteUser(target.id);
+      loadUsers(usersOffset, search);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Delete failed");
+    }
+  }, [loadUsers, usersOffset, search]);
+
+  // Initial load — fetch stats and all three tabs once.
   useEffect(() => {
     if (user?.role !== "admin") return;
-    Promise.all([adminGetStats(), adminListSubmissions(), adminListUsers(), adminListMarlinTests()])
-      .then(([s, sub, u, m]) => {
-        setStats(s);
-        setSubmissions(sub);
-        setUsers(u);
-        setMarlinTests(m);
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [user]);
-
-  const filteredMarlin = useMemo(() => {
-    const q = search.toLowerCase();
-    return marlinTests.filter(
-      (t) =>
-        !q ||
-        t.username?.toLowerCase().includes(q) ||
-        t.prompt_text.toLowerCase().includes(q)
+    adminGetStats().then(setStats).catch((err) => setError(err.message));
+    Promise.all([loadMarlin(0, ""), loadSubmissions(0, ""), loadUsers(0, "")]).finally(
+      () => setLoading(false)
     );
-  }, [marlinTests, search]);
+  }, [user, loadMarlin, loadSubmissions, loadUsers]);
 
-  const filteredSubmissions = useMemo(() => {
-    const q = search.toLowerCase();
-    return submissions.filter(
-      (s) =>
-        !q ||
-        s.username?.toLowerCase().includes(q) ||
-        s.prompt_text.toLowerCase().includes(q)
-    );
-  }, [submissions, search]);
-
-  const filteredUsers = useMemo(() => {
-    const q = search.toLowerCase();
-    return users.filter(
-      (u) =>
-        !q ||
-        u.username.toLowerCase().includes(q) ||
-        u.email.toLowerCase().includes(q)
-    );
-  }, [users, search]);
+  // Debounced server-side search — refetch only the active tab when search changes.
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    const handle = setTimeout(() => {
+      if (tab === "marlin") loadMarlin(0, search);
+      else if (tab === "submissions") loadSubmissions(0, search);
+      else loadUsers(0, search);
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [search, tab, user, loadMarlin, loadSubmissions, loadUsers]);
 
   if (!user || user.role !== "admin") {
     return (
@@ -126,9 +159,9 @@ export default function AdminPage() {
         <div className="flex gap-1 rounded-lg border border-border bg-surface p-1">
           {(
             [
-              { id: "marlin", label: "Marlin Tests", count: marlinTests.length },
-              { id: "submissions", label: "Code Comparison", count: submissions.length },
-              { id: "users", label: "Users", count: users.length },
+              { id: "marlin", label: "Marlin Tests", count: marlinTotal },
+              { id: "submissions", label: "Code Comparison", count: submissionsTotal },
+              { id: "users", label: "Users", count: usersTotal },
             ] as { id: Tab; label: string; count: number }[]
           ).map((t) => (
             <button
@@ -165,13 +198,19 @@ export default function AdminPage() {
       {/* ── Marlin Tests tab ── */}
       {tab === "marlin" && (
         <div className="space-y-3">
-          {filteredMarlin.length === 0 ? (
+          {marlinTests.length === 0 ? (
             <EmptyState
               message={search ? `No Marlin Tests matching "${search}"` : "No Marlin Test submissions yet."}
             />
           ) : (
-            filteredMarlin.map((t) => <MarlinRow key={t.id} test={t} />)
+            marlinTests.map((t) => <MarlinRow key={t.id} test={t} />)
           )}
+          <Pagination
+            total={marlinTotal}
+            limit={PAGE_SIZE}
+            offset={marlinOffset}
+            onChange={(o) => loadMarlin(o, search)}
+          />
         </div>
       )}
 
@@ -192,28 +231,46 @@ export default function AdminPage() {
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <span className="flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-green-500" />
-                {completedCount} completed
+                {completedCount} completed (page)
               </span>
               <span className="flex items-center gap-1">
                 <span className="h-2 w-2 rounded-full bg-yellow-500" />
-                {pendingCount} pending
+                {pendingCount} pending (page)
               </span>
             </div>
           )}
-          {filteredSubmissions.length === 0 ? (
+          {submissions.length === 0 ? (
             <EmptyState
               message={search ? `No submissions matching "${search}"` : "No submissions yet."}
             />
           ) : (
-            filteredSubmissions.map((s) => <SubmissionRow key={s.id} submission={s} />)
+            submissions.map((s) => <SubmissionRow key={s.id} submission={s} />)
           )}
+          <Pagination
+            total={submissionsTotal}
+            limit={PAGE_SIZE}
+            offset={submissionsOffset}
+            onChange={(o) => loadSubmissions(o, search)}
+          />
         </div>
       )}
 
       {/* ── Users tab ── */}
       {tab === "users" && (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <button
+              onClick={() => setUserModal({ mode: "create" })}
+              className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 hover:bg-accent-hover"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              New user
+            </button>
+          </div>
         <div className="overflow-hidden rounded-xl border border-border bg-surface">
-          {filteredUsers.length === 0 ? (
+          {users.length === 0 ? (
             <div className="py-10 text-center text-sm text-gray-400">
               {search ? `No users matching "${search}"` : "No users found."}
             </div>
@@ -225,23 +282,16 @@ export default function AdminPage() {
                   <th className="px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">Email</th>
                   <th className="px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">Role</th>
                   <th className="px-5 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">Joined</th>
+                  <th className="px-5 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filteredUsers.map((u) => (
+                {users.map((u) => (
                   <tr key={u.id} className="transition-colors hover:bg-surface-raised/50">
                     <td className="px-5 py-3.5 font-medium text-white">{u.username}</td>
                     <td className="px-5 py-3.5 text-gray-400">{u.email}</td>
                     <td className="px-5 py-3.5">
-                      {u.role === "admin" ? (
-                        <span className="rounded-full border border-accent/20 bg-accent-subtle px-2.5 py-0.5 text-xs font-medium text-accent">
-                          Admin
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-border bg-surface-raised px-2.5 py-0.5 text-xs font-medium text-gray-400">
-                          Tasker
-                        </span>
-                      )}
+                      <RoleBadge role={u.role} />
                     </td>
                     <td className="px-5 py-3.5 text-gray-500">
                       {new Date(u.created_at + "Z").toLocaleDateString("en-US", {
@@ -250,14 +300,92 @@ export default function AdminPage() {
                         year: "numeric",
                       })}
                     </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => setUserModal({ mode: "edit", user: u })}
+                          className="rounded-md border border-border bg-surface-raised px-3 py-1 text-xs font-medium text-gray-300 hover:bg-surface"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(u)}
+                          disabled={u.id === user.id}
+                          title={u.id === user.id ? "You cannot delete your own account" : undefined}
+                          className="rounded-md border border-danger/30 bg-danger-subtle px-3 py-1 text-xs font-medium text-red-300 hover:bg-danger-subtle/70 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
         </div>
+          <Pagination
+            total={usersTotal}
+            limit={PAGE_SIZE}
+            offset={usersOffset}
+            onChange={(o) => loadUsers(o, search)}
+          />
+        </div>
+      )}
+
+      {userModal && (
+        <UserFormModal
+          mode={userModal.mode}
+          user={userModal.user}
+          onClose={() => setUserModal(null)}
+          onSaved={() => loadUsers(usersOffset, search)}
+        />
       )}
     </div>
+  );
+}
+
+function ReviewStatusBadge({ test }: { test: MarlinTest }) {
+  if (test.review_status === "submitted") {
+    return (
+      <span className="rounded-full border border-green-500/20 bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-400">
+        Reviewed · {test.final_percent != null ? `${test.final_percent.toFixed(1)}%` : "—"}
+      </span>
+    );
+  }
+  if (test.review_status === "draft") {
+    return (
+      <span className="rounded-full border border-yellow-500/20 bg-yellow-500/10 px-2.5 py-0.5 text-xs font-medium text-yellow-400">
+        In review
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-border bg-surface-raised px-2.5 py-0.5 text-xs font-medium text-gray-400">
+      Pending
+    </span>
+  );
+}
+
+function RoleBadge({ role }: { role: User["role"] }) {
+  if (role === "admin") {
+    return (
+      <span className="rounded-full border border-accent/20 bg-accent-subtle px-2.5 py-0.5 text-xs font-medium text-accent">
+        Admin
+      </span>
+    );
+  }
+  if (role === "reviewer") {
+    return (
+      <span className="rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-300">
+        Reviewer
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-border bg-surface-raised px-2.5 py-0.5 text-xs font-medium text-gray-400">
+      Tasker
+    </span>
   );
 }
 
@@ -282,9 +410,15 @@ function MarlinRow({ test }: { test: MarlinTest }) {
               </svg>
               {test.username ?? `User #${test.user_id}`}
             </span>
-            <span className="rounded-full border border-green-500/20 bg-green-500/10 px-2.5 py-0.5 text-xs font-medium text-green-400">
-              Completed
-            </span>
+            <ReviewStatusBadge test={test} />
+            {test.reviewer_username && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/20 bg-purple-500/10 px-2.5 py-0.5 text-xs font-medium text-purple-300">
+                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m9 12.75 3 3 3-3M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0Z" />
+                </svg>
+                by {test.reviewer_username}
+              </span>
+            )}
             <span className="rounded-full border border-border bg-surface-raised px-2.5 py-0.5 text-xs text-gray-500">
               {answeredCount}/{totalKeys} answers
             </span>

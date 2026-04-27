@@ -1,13 +1,16 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { listPrompts, listMarlinTests } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import AuthGuard from "@/components/AuthGuard";
 import AssessmentCard from "@/components/AssessmentCard";
 import MarlinTestCard from "@/components/MarlinTestCard";
+import Pagination from "@/components/Pagination";
 import type { Prompt, MarlinTest } from "@/types";
+
+const PAGE_SIZE = 10;
 
 export default function DashboardPage() {
   return (
@@ -34,6 +37,8 @@ interface AssessmentSectionProps {
   newLabel: string;
   loading: boolean;
   disabled?: boolean;
+  total?: number;
+  footer?: ReactNode;
 }
 
 function AssessmentSection({
@@ -48,9 +53,12 @@ function AssessmentSection({
   newLabel,
   loading,
   disabled = false,
+  total,
+  footer,
 }: AssessmentSectionProps) {
   const completed = items.filter((i) => i.completed).length;
   const pending = items.filter((i) => !i.completed).length;
+  const displayTotal = total ?? items.length;
 
   return (
     <div className="rounded-2xl border border-border bg-surface overflow-hidden">
@@ -91,7 +99,7 @@ function AssessmentSection({
       <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
         <div className="px-6 py-4">
           <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Total</p>
-          <p className="mt-0.5 text-xl font-bold text-white">{loading ? "—" : items.length}</p>
+          <p className="mt-0.5 text-xl font-bold text-white">{loading ? "—" : displayTotal}</p>
         </div>
         <div className="px-6 py-4">
           <p className="text-xs font-medium uppercase tracking-wider text-gray-500">Completed</p>
@@ -147,6 +155,7 @@ function AssessmentSection({
           </div>
         )}
       </div>
+      {!loading && footer && <div className="border-t border-border p-4">{footer}</div>}
     </div>
   );
 }
@@ -154,22 +163,43 @@ function AssessmentSection({
 function DashboardContent() {
   const { user } = useAuth();
   const [prompts, setPrompts] = useState<Prompt[]>([]);
+  const [promptsTotal, setPromptsTotal] = useState(0);
+  const [promptsOffset, setPromptsOffset] = useState(0);
   const [marlinTests, setMarlinTests] = useState<MarlinTest[]>([]);
+  const [marlinTotal, setMarlinTotal] = useState(0);
+  const [marlinOffset, setMarlinOffset] = useState(0);
   const [loadingPrompts, setLoadingPrompts] = useState(true);
   const [loadingMarlin, setLoadingMarlin] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    listPrompts()
-      .then(setPrompts)
+  const loadPrompts = useCallback((offset: number) => {
+    setLoadingPrompts(true);
+    return listPrompts({ limit: PAGE_SIZE, offset })
+      .then((res) => {
+        setPrompts(res.items);
+        setPromptsTotal(res.total);
+        setPromptsOffset(res.offset);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingPrompts(false));
+  }, []);
 
-    listMarlinTests()
-      .then(setMarlinTests)
+  const loadMarlin = useCallback((offset: number) => {
+    setLoadingMarlin(true);
+    return listMarlinTests({ limit: PAGE_SIZE, offset })
+      .then((res) => {
+        setMarlinTests(res.items);
+        setMarlinTotal(res.total);
+        setMarlinOffset(res.offset);
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoadingMarlin(false));
   }, []);
+
+  useEffect(() => {
+    loadPrompts(0);
+    loadMarlin(0);
+  }, [loadPrompts, loadMarlin]);
 
   if (error) {
     return (
@@ -223,6 +253,15 @@ function DashboardContent() {
           newHref="/marlin-test/new"
           newLabel="New Marlin Test"
           loading={loadingMarlin}
+          total={marlinTotal}
+          footer={
+            <Pagination
+              total={marlinTotal}
+              limit={PAGE_SIZE}
+              offset={marlinOffset}
+              onChange={(o) => loadMarlin(o)}
+            />
+          }
         />
 
         <AssessmentSection
@@ -241,6 +280,15 @@ function DashboardContent() {
           newLabel="New Assessment"
           loading={loadingPrompts}
           disabled
+          total={promptsTotal}
+          footer={
+            <Pagination
+              total={promptsTotal}
+              limit={PAGE_SIZE}
+              offset={promptsOffset}
+              onChange={(o) => loadPrompts(o)}
+            />
+          }
         />
       </div>
     </div>

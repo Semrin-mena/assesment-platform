@@ -25,6 +25,12 @@ export function useAuth() {
 
 const PUBLIC_PATHS = ["/login", "/register"];
 
+function homePathFor(role: User["role"]): string {
+  if (role === "admin") return "/admin";
+  if (role === "reviewer") return "/reviewer";
+  return "/";
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(u);
         // If on a public page while logged in, redirect to appropriate dashboard
         if (PUBLIC_PATHS.includes(pathname)) {
-          router.replace(u.role === "admin" ? "/admin" : "/");
+          router.replace(homePathFor(u.role));
         }
       })
       .catch(() => {
@@ -61,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const handleLogin = useCallback((token: string, u: User) => {
     localStorage.setItem("token", token);
     setUser(u);
-    router.replace(u.role === "admin" ? "/admin" : "/");
+    router.replace(homePathFor(u.role));
   }, [router]);
 
   const handleLogout = useCallback(() => {

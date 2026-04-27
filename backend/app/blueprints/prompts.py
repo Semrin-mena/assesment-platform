@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth
+from app.pagination import get_page_params, get_search_query, paginated
 from app.services.llm_service import generate_pair
 
 bp = Blueprint("prompts", __name__, url_prefix="/api/prompts")
@@ -48,8 +49,12 @@ def create_prompt():
 @require_auth
 def list_prompts():
     # Taskers only see their own prompts
-    prompts = models.list_prompts(user_id=g.user["id"])
-    return jsonify(prompts)
+    limit, offset = get_page_params()
+    q = get_search_query()
+    user_id = g.user["id"]
+    items = models.list_prompts(user_id=user_id, limit=limit, offset=offset, q=q)
+    total = models.count_prompts(user_id=user_id, q=q)
+    return jsonify(paginated(items, total, limit, offset))
 
 
 @bp.route("/<int:prompt_id>", methods=["GET"])
