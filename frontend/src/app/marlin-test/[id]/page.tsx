@@ -275,7 +275,7 @@ function MarlinTestDetail() {
   const answers = test.answers;
 
   return (
-    <div className="animate-fade-in mx-auto max-w-4xl space-y-6">
+    <div className="animate-fade-in mx-auto max-w-6xl space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>

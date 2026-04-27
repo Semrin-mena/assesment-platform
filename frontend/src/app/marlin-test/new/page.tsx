@@ -2134,18 +2134,37 @@ interface FileChange {
 
 function parseDiff(diff: string): FileChange[] {
   const files: FileChange[] = [];
-  const blocks = diff.split(/^diff --git .+$/m).slice(1);
-  const headers = [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)];
-  blocks.forEach((block, i) => {
-    const path = headers[i]?.[1] ?? `file_${i + 1}`;
-    let added = 0;
-    let removed = 0;
-    for (const line of block.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) added++;
-      else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-    }
-    files.push({ path, added, removed, diff: block.trim() });
-  });
+
+  const hasGitHeaders = /^diff --git /m.test(diff);
+
+  if (hasGitHeaders) {
+    const blocks = diff.split(/^diff --git .+$/m).slice(1);
+    const headers = [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)];
+    blocks.forEach((block, i) => {
+      const path = headers[i]?.[1] ?? `file_${i + 1}`;
+      let added = 0;
+      let removed = 0;
+      for (const line of block.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+      }
+      files.push({ path, added, removed, diff: block.trim() });
+    });
+  } else {
+    const blocks = diff.split(/^(?=--- )/m).filter(Boolean);
+    blocks.forEach((block, i) => {
+      const pathMatch = block.match(/^--- [ab]\/(.+)$/m);
+      const path = pathMatch?.[1] ?? `file_${i + 1}`;
+      let added = 0;
+      let removed = 0;
+      for (const line of block.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+      }
+      files.push({ path, added, removed, diff: block.trim() });
+    });
+  }
+
   return files;
 }
 

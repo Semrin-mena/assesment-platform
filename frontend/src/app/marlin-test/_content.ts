@@ -2102,18 +2102,40 @@ export interface FileChange {
 
 export function parseDiff(diff: string): FileChange[] {
   const files: FileChange[] = [];
-  const blocks = diff.split(/^diff --git .+$/m).slice(1);
-  const headers = [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)];
-  blocks.forEach((block, i) => {
-    const path = headers[i]?.[1] ?? `file_${i + 1}`;
-    let added = 0;
-    let removed = 0;
-    for (const line of block.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) added++;
-      else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-    }
-    files.push({ path, added, removed, diff: block.trim() });
-  });
+
+  // Support both standard `diff --git a/path b/path` format
+  // and the `--- a/path` / `+++ b/path` header-only format used in this file.
+  const hasGitHeaders = /^diff --git /m.test(diff);
+
+  if (hasGitHeaders) {
+    const blocks = diff.split(/^diff --git .+$/m).slice(1);
+    const headers = [...diff.matchAll(/^diff --git a\/.+ b\/(.+)$/gm)];
+    blocks.forEach((block, i) => {
+      const path = headers[i]?.[1] ?? `file_${i + 1}`;
+      let added = 0;
+      let removed = 0;
+      for (const line of block.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+      }
+      files.push({ path, added, removed, diff: block.trim() });
+    });
+  } else {
+    // Split on `--- ` file headers (the format used by DIFF_A / DIFF_B in this file)
+    const blocks = diff.split(/^(?=--- )/m).filter(Boolean);
+    blocks.forEach((block, i) => {
+      const pathMatch = block.match(/^--- [ab]\/(.+)$/m);
+      const path = pathMatch?.[1] ?? `file_${i + 1}`;
+      let added = 0;
+      let removed = 0;
+      for (const line of block.split("\n")) {
+        if (line.startsWith("+") && !line.startsWith("+++")) added++;
+        else if (line.startsWith("-") && !line.startsWith("---")) removed++;
+      }
+      files.push({ path, added, removed, diff: block.trim() });
+    });
+  }
+
   return files;
 }
 

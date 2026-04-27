@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { useAuth } from "@/lib/auth-context";
 
 export default function Navbar() {
@@ -14,11 +15,13 @@ export default function Navbar() {
       <header className="sticky top-0 z-50 glass">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <Link href="/" className="flex items-center gap-3 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-accent to-black shadow-lg shadow-accent/20 transition-shadow group-hover:shadow-accent/40">
-              <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
+            <Image
+              src="/menadevs-logo.png"
+              alt="MENADevs Logo"
+              width={36}
+              height={36}
+              className="rounded-lg"
+            />
             <span className="text-xl font-bold tracking-tight text-white">
               Code<span className="text-gradient">Judge</span>
             </span>
