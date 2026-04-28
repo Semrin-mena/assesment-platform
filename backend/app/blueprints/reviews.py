@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request, g
 
 from app import models
-from app.auth import require_reviewer
+from app.auth import require_auth, require_reviewer
 from app.pagination import get_page_params, get_search_query, paginated
 from app.services import marlin_grader
 
@@ -26,23 +26,33 @@ def review_queue():
 
 
 @bp.route("/marlin/<int:test_id>", methods=["GET"])
-@require_reviewer
+@require_auth
 def get_marlin_review(test_id):
-    """Fetch (and create-on-first-open) the draft review for a marlin test."""
+    """Fetch the review for a marlin test.
+
+    Reviewers: a draft is auto-created on first open if none exists.
+    Admins: read-only — 404 if no review has been started yet. (No auto-create
+    so admins can browse without claiming reviews.)
+    Other roles: 403.
+    """
+    role = g.user["role"]
+    if role not in ("reviewer", "admin"):
+        return jsonify({"error": "Reviewer or admin access required"}), 403
+
     test = models.get_marlin_test(test_id)
     if not test:
         return jsonify({"error": "Marlin test not found"}), 404
 
     review = models.get_review_by_test(test_id)
     if review is None:
-        # Build the auto-graded draft and persist it.
+        if role == "admin":
+            return jsonify({"error": "No review has been started for this test"}), 404
+        # Reviewer: build the auto-graded draft and persist it.
         draft_rows = marlin_grader.build_draft_scores(test["answers"])
         review_id = models.create_review_with_scores(test_id, g.user["id"], draft_rows)
         review = models.get_review_by_test(test_id)
         scores = models.get_review_scores(review_id)
     else:
-        # If a different reviewer has claimed it, we still let any reviewer view,
-        # but only the original reviewer can edit (enforced in PUT below).
         scores = models.get_review_scores(review["id"])
 
     return jsonify({

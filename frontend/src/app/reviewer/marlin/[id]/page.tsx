@@ -69,8 +69,11 @@ export default function MarlinReviewPage({ params }: PageProps) {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
 
+  const canEdit = user?.role === "reviewer";
+  const canView = user?.role === "reviewer" || user?.role === "admin";
+
   useEffect(() => {
-    if (user?.role !== "reviewer") return;
+    if (!canView) return;
     reviewerGetMarlin(testId)
       .then((d) => {
         setData(d);
@@ -85,9 +88,10 @@ export default function MarlinReviewPage({ params }: PageProps) {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [testId, user]);
+  }, [testId, user, canView]);
 
   const submitted = data?.review.status === "submitted";
+  const formLocked = submitted || !canEdit;
 
   const liveScores = useMemo(() => {
     if (!data) return [];
@@ -140,8 +144,8 @@ export default function MarlinReviewPage({ params }: PageProps) {
     }
   };
 
-  if (!user || user.role !== "reviewer") {
-    return <div className="py-20 text-center text-sm text-gray-400">Reviewer access required.</div>;
+  if (!user || !canView) {
+    return <div className="py-20 text-center text-sm text-gray-400">Reviewer or admin access required.</div>;
   }
   if (loading) {
     return (
@@ -161,9 +165,21 @@ export default function MarlinReviewPage({ params }: PageProps) {
     <div className="animate-fade-in space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Link href="/reviewer" className="text-sm text-gray-500 hover:text-gray-300">← Back to queue</Link>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">Review · Marlin Test #{test.id}</h1>
-          <p className="mt-1 text-sm text-gray-400">Tasker: <span className="text-gray-200">{test.username}</span></p>
+          <Link
+            href={canEdit ? "/reviewer" : "/admin"}
+            className="text-sm text-gray-500 hover:text-gray-300"
+          >
+            ← Back
+          </Link>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-white">
+            {canEdit ? "Review" : "Reviewed"} · Marlin Test #{test.id}
+          </h1>
+          <p className="mt-1 text-sm text-gray-400">
+            Tasker: <span className="text-gray-200">{test.username}</span>
+            {data.review.reviewer_username && (
+              <> · Reviewer: <span className="text-gray-200">{data.review.reviewer_username}</span></>
+            )}
+          </p>
         </div>
         <div className="rounded-xl border border-border bg-surface px-5 py-3 text-right">
           <p className="text-xs uppercase tracking-wider text-gray-500">Total</p>
@@ -189,7 +205,7 @@ export default function MarlinReviewPage({ params }: PageProps) {
             key={s.question_key}
             score={s}
             override={overrides[s.question_key]}
-            disabled={submitted}
+            disabled={formLocked}
             onChange={(patch) =>
               setOverrides((prev) => ({
                 ...prev,
@@ -200,27 +216,29 @@ export default function MarlinReviewPage({ params }: PageProps) {
         ))}
       </div>
 
-      <div className="sticky bottom-4 flex items-center justify-between rounded-xl border border-border bg-surface px-5 py-4 shadow-lg">
-        <div className="text-sm text-gray-400">
-          Live total: <span className="font-semibold text-white">{livePercent.toFixed(1)}%</span>
+      {canEdit && (
+        <div className="sticky bottom-4 flex items-center justify-between rounded-xl border border-border bg-surface px-5 py-4 shadow-lg">
+          <div className="text-sm text-gray-400">
+            Live total: <span className="font-semibold text-white">{livePercent.toFixed(1)}%</span>
+          </div>
+          <div className="flex gap-2">
+            <button
+              disabled={saving || submitted}
+              onClick={() => save(false)}
+              className="rounded-lg border border-border bg-surface-raised px-4 py-2 text-sm font-medium text-gray-200 hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save Draft"}
+            </button>
+            <button
+              disabled={saving || submitted}
+              onClick={() => save(true)}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitted ? "Submitted" : "Submit Review"}
+            </button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            disabled={saving || submitted}
-            onClick={() => save(false)}
-            className="rounded-lg border border-border bg-surface-raised px-4 py-2 text-sm font-medium text-gray-200 hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save Draft"}
-          </button>
-          <button
-            disabled={saving || submitted}
-            onClick={() => save(true)}
-            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-accent/25 transition-all hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitted ? "Submitted" : "Submit Review"}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
