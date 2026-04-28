@@ -405,72 +405,59 @@ def get_marlin_test(test_id):
     return d
 
 
-def list_marlin_tests(user_id=None, limit=20, offset=0, q=None):
+_MARLIN_REVIEW_STATUS_CLAUSES = {
+    "pending": "r.id IS NULL",
+    "in_review": "r.status = 'draft'",
+    "reviewed": "r.status = 'submitted'",
+}
+
+
+def _marlin_filters(user_id, pattern, review_status):
+    """Build the WHERE clauses + params shared by list_/count_marlin_tests."""
+    where = []
+    params = []
+    if user_id:
+        where.append("m.user_id = ?")
+        params.append(user_id)
+    if pattern:
+        if user_id:
+            where.append("LOWER(m.prompt_text) LIKE ? ESCAPE '\\'")
+            params.append(pattern)
+        else:
+            where.append(
+                "(LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pattern, pattern])
+    rs = _MARLIN_REVIEW_STATUS_CLAUSES.get(review_status)
+    if rs:
+        where.append(rs)
+    return where, params
+
+
+def list_marlin_tests(user_id=None, limit=20, offset=0, q=None, review_status=None):
+    """List marlin tests with optional search and review-status filter.
+
+    review_status: 'pending' | 'in_review' | 'reviewed' | None.
+    """
     db = get_db()
     pattern = _like_pattern(q)
-    if user_id:
-        if pattern:
-            rows = db.execute(
-                """
-                SELECT m.id, m.user_id, m.prompt_text, m.answers, m.created_at,
-                       r.status AS review_status, r.final_percent,
-                       r.reviewer_id, ru.username AS reviewer_username
-                FROM marlin_tests m
-                LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
-                LEFT JOIN users ru ON ru.id = r.reviewer_id
-                WHERE m.user_id = ? AND LOWER(m.prompt_text) LIKE ? ESCAPE '\\'
-                ORDER BY m.created_at DESC LIMIT ? OFFSET ?
-                """,
-                (user_id, pattern, limit, offset),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                """
-                SELECT m.id, m.user_id, m.prompt_text, m.answers, m.created_at,
-                       r.status AS review_status, r.final_percent,
-                       r.reviewer_id, ru.username AS reviewer_username
-                FROM marlin_tests m
-                LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
-                LEFT JOIN users ru ON ru.id = r.reviewer_id
-                WHERE m.user_id = ?
-                ORDER BY m.created_at DESC LIMIT ? OFFSET ?
-                """,
-                (user_id, limit, offset),
-            ).fetchall()
-    else:
-        if pattern:
-            rows = db.execute(
-                """
-                SELECT m.id, m.user_id, m.prompt_text, m.answers, m.created_at,
-                       u.username,
-                       r.status AS review_status, r.final_percent,
-                       r.reviewer_id, ru.username AS reviewer_username
-                FROM marlin_tests m
-                JOIN users u ON u.id = m.user_id
-                LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
-                LEFT JOIN users ru ON ru.id = r.reviewer_id
-                WHERE LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\'
-                ORDER BY m.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (pattern, pattern, limit, offset),
-            ).fetchall()
-        else:
-            rows = db.execute(
-                """
-                SELECT m.id, m.user_id, m.prompt_text, m.answers, m.created_at,
-                       u.username,
-                       r.status AS review_status, r.final_percent,
-                       r.reviewer_id, ru.username AS reviewer_username
-                FROM marlin_tests m
-                JOIN users u ON u.id = m.user_id
-                LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
-                LEFT JOIN users ru ON ru.id = r.reviewer_id
-                ORDER BY m.created_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (limit, offset),
-            ).fetchall()
+    sql = """
+        SELECT m.id, m.user_id, m.prompt_text, m.answers, m.created_at,
+               u.username,
+               r.status AS review_status, r.final_percent,
+               r.reviewer_id, ru.username AS reviewer_username
+        FROM marlin_tests m
+        JOIN users u ON u.id = m.user_id
+        LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
+        LEFT JOIN users ru ON ru.id = r.reviewer_id
+    """
+    where, params = _marlin_filters(user_id, pattern, review_status)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    rows = db.execute(sql, params).fetchall()
     result = []
     for r in rows:
         d = dict(r)
@@ -512,26 +499,34 @@ def get_review_scores(review_id):
 
 
 def create_review_with_scores(marlin_test_id, reviewer_id, draft_rows):
-    """Create a draft review and its per-question score rows in one transaction."""
+    """Create a draft review and its per-question score rows atomically.
+
+    If any row fails to insert, the review row is rolled back too — we never
+    persist a half-populated review.
+    """
     db = get_db()
-    cursor = db.execute(
-        "INSERT INTO marlin_reviews (marlin_test_id, reviewer_id, status) VALUES (?, ?, 'draft')",
-        (marlin_test_id, reviewer_id),
-    )
-    review_id = cursor.lastrowid
-    for r in draft_rows:
-        db.execute(
-            """
-            INSERT INTO marlin_question_scores
-                (review_id, question_key, expected_answer, given_answer,
-                 auto_score, override_score, final_score, weight)
-            VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
-            """,
-            (review_id, r["question_key"], r["expected_answer"], r["given_answer"],
-             r["auto_score"], r["final_score"], r["weight"]),
+    try:
+        cursor = db.execute(
+            "INSERT INTO marlin_reviews (marlin_test_id, reviewer_id, status) VALUES (?, ?, 'draft')",
+            (marlin_test_id, reviewer_id),
         )
-    db.commit()
-    return review_id
+        review_id = cursor.lastrowid
+        for r in draft_rows:
+            db.execute(
+                """
+                INSERT INTO marlin_question_scores
+                    (review_id, question_key, expected_answer, given_answer,
+                     auto_score, override_score, final_score, weight)
+                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                """,
+                (review_id, r["question_key"], r["expected_answer"], r["given_answer"],
+                 r["auto_score"], r["final_score"], r["weight"]),
+            )
+        db.commit()
+        return review_id
+    except Exception:
+        db.rollback()
+        raise
 
 
 def update_review_score(review_id, question_key, override_score, final_score, notes):
@@ -640,29 +635,17 @@ def count_review_queue(reviewer_id, status=None, q=None):
     return row["c"] if row else 0
 
 
-def count_marlin_tests(user_id=None, q=None):
+def count_marlin_tests(user_id=None, q=None, review_status=None):
     db = get_db()
     pattern = _like_pattern(q)
-    if user_id:
-        if pattern:
-            row = db.execute(
-                "SELECT COUNT(*) AS c FROM marlin_tests WHERE user_id = ? AND LOWER(prompt_text) LIKE ? ESCAPE '\\'",
-                (user_id, pattern),
-            ).fetchone()
-        else:
-            row = db.execute(
-                "SELECT COUNT(*) AS c FROM marlin_tests WHERE user_id = ?", (user_id,)
-            ).fetchone()
-    else:
-        if pattern:
-            row = db.execute(
-                """
-                SELECT COUNT(*) AS c FROM marlin_tests m
-                JOIN users u ON u.id = m.user_id
-                WHERE LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\'
-                """,
-                (pattern, pattern),
-            ).fetchone()
-        else:
-            row = db.execute("SELECT COUNT(*) AS c FROM marlin_tests").fetchone()
+    sql = """
+        SELECT COUNT(*) AS c
+        FROM marlin_tests m
+        JOIN users u ON u.id = m.user_id
+        LEFT JOIN marlin_reviews r ON r.marlin_test_id = m.id
+    """
+    where, params = _marlin_filters(user_id, pattern, review_status)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    row = db.execute(sql, params).fetchone()
     return row["c"] if row else 0

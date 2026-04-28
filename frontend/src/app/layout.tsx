@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CodeJudge - LLM Assessment Platform",
+  title: "MenaTest - LLM Assessment Platform",
   description: "Compare and evaluate LLM-generated code responses side by side",
   icons: { icon: "/favicon.svg" },
 };
@@ -40,7 +40,7 @@ export default function RootLayout({
 
           <footer className="border-t border-border px-6 py-6">
             <div className="mx-auto flex max-w-7xl items-center justify-center text-xs text-gray-500">
-              <span>CodeJudge Assessment Platform</span>
+              <span>MenaTest Assessment Platform</span>
             </div>
           </footer>
         </AuthProvider>

@@ -44,7 +44,7 @@ export default function RegisterPage() {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-white">Create an account</h1>
-          <p className="mt-1 text-sm text-gray-400">Join CodeJudge to start evaluating AI code</p>
+          <p className="mt-1 text-sm text-gray-400">Join MenaTest to start evaluating AI code</p>
         </div>
 
         {/* Form */}

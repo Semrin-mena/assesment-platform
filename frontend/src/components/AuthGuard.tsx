@@ -1,9 +1,34 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import type { User } from "@/types";
 
-export default function AuthGuard({ children }: { children: React.ReactNode }) {
+interface AuthGuardProps {
+  children: React.ReactNode;
+  // If set, only users with one of these roles can render the children.
+  // Other roles get redirected to their own home page.
+  allow?: Array<User["role"]>;
+}
+
+function homePathFor(role: User["role"]): string {
+  if (role === "admin") return "/admin";
+  if (role === "reviewer") return "/reviewer";
+  return "/";
+}
+
+export default function AuthGuard({ children, allow }: AuthGuardProps) {
   const { user, loading } = useAuth();
+  const router = useRouter();
+
+  const blocked = !!(user && allow && !allow.includes(user.role));
+
+  useEffect(() => {
+    if (blocked && user) {
+      router.replace(homePathFor(user.role));
+    }
+  }, [blocked, user, router]);
 
   if (loading) {
     return (
@@ -15,7 +40,13 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    // AuthContext will handle redirect to /login
+    // AuthContext handles redirect to /login.
+    return null;
+  }
+
+  if (blocked) {
+    // Redirect kicks in via the effect above; render nothing in the meantime
+    // to avoid flashing unauthorized content.
     return null;
   }
 

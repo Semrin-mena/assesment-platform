@@ -23,7 +23,7 @@ export default function Navbar() {
               className="rounded-lg"
             />
             <span className="text-xl font-bold tracking-tight text-white">
-              Code<span className="text-gradient">Judge</span>
+              Mena<span className="text-gradient">Test</span>
             </span>
           </Link>
 

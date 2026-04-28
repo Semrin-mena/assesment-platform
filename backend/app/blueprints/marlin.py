@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth, require_admin
-from app.pagination import get_page_params, get_search_query, paginated
+from app.pagination import clamp_offset, get_page_params, get_search_query, paginated
 
 bp = Blueprint("marlin", __name__, url_prefix="/api/marlin")
 
@@ -23,8 +23,8 @@ def create_marlin_test():
         return jsonify({"error": "answers must be an object"}), 400
 
     test_id = models.create_marlin_test(g.user["id"], prompt_text, answers)
-
-    return jsonify({"id": test_id, "prompt_text": prompt_text, "answers": answers}), 201
+    # Return the same shape as GET /api/marlin/<id> for consistency.
+    return jsonify(models.get_marlin_test(test_id)), 201
 
 
 @bp.route("", methods=["GET"])
@@ -33,8 +33,9 @@ def list_marlin_tests():
     limit, offset = get_page_params()
     q = get_search_query()
     user_id = g.user["id"]
-    items = models.list_marlin_tests(user_id=user_id, limit=limit, offset=offset, q=q)
     total = models.count_marlin_tests(user_id=user_id, q=q)
+    offset = clamp_offset(offset, total, limit)
+    items = models.list_marlin_tests(user_id=user_id, limit=limit, offset=offset, q=q)
     return jsonify(paginated(items, total, limit, offset))
 
 
@@ -53,11 +54,21 @@ def get_marlin_test(test_id):
 
 # --- Admin ---
 
+_VALID_REVIEW_STATUS = {"pending", "in_review", "reviewed"}
+
+
 @bp.route("/admin/all", methods=["GET"])
 @require_admin
 def admin_list_marlin_tests():
     limit, offset = get_page_params()
     q = get_search_query()
-    items = models.list_marlin_tests(user_id=None, limit=limit, offset=offset, q=q)
-    total = models.count_marlin_tests(user_id=None, q=q)
+    review_status = request.args.get("review_status")
+    if review_status not in _VALID_REVIEW_STATUS:
+        review_status = None
+
+    total = models.count_marlin_tests(user_id=None, q=q, review_status=review_status)
+    offset = clamp_offset(offset, total, limit)
+    items = models.list_marlin_tests(
+        user_id=None, limit=limit, offset=offset, q=q, review_status=review_status,
+    )
     return jsonify(paginated(items, total, limit, offset))

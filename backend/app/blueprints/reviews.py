@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth, require_reviewer
-from app.pagination import get_page_params, get_search_query, paginated
+from app.pagination import clamp_offset, get_page_params, get_search_query, paginated
 from app.services import marlin_grader
 
 bp = Blueprint("reviews", __name__, url_prefix="/api/reviews")
@@ -18,10 +18,11 @@ def review_queue():
     if status not in ("pending", "reviewed"):
         status = "pending"
 
+    total = models.count_review_queue(reviewer_id=g.user["id"], status=status, q=q)
+    offset = clamp_offset(offset, total, limit)
     items = models.list_review_queue(
         reviewer_id=g.user["id"], status=status, limit=limit, offset=offset, q=q
     )
-    total = models.count_review_queue(reviewer_id=g.user["id"], status=status, q=q)
     return jsonify(paginated(items, total, limit, offset))
 
 

@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_auth
-from app.pagination import get_page_params, get_search_query, paginated
+from app.pagination import clamp_offset, get_page_params, get_search_query, paginated
 from app.services.llm_service import generate_pair
 
 bp = Blueprint("prompts", __name__, url_prefix="/api/prompts")
@@ -17,16 +17,14 @@ def create_prompt():
 
     prompt_text = data["prompt_text"].strip()
 
-    # Save the prompt scoped to the current user
-    prompt_id = models.create_prompt(g.user["id"], prompt_text)
-
-    # Generate two LLM responses
+    # Generate the LLM pair FIRST — if this fails we don't want an orphan prompt row.
     try:
         pair = generate_pair(prompt_text)
     except Exception as e:
         return jsonify({"error": f"LLM generation failed: {str(e)}"}), 502
 
-    # Save both responses
+    # Persist prompt + both responses only after the LLM call succeeded.
+    prompt_id = models.create_prompt(g.user["id"], prompt_text)
     responses = {}
     for variant in ("A", "B"):
         resp_id = models.create_response(
@@ -52,8 +50,9 @@ def list_prompts():
     limit, offset = get_page_params()
     q = get_search_query()
     user_id = g.user["id"]
-    items = models.list_prompts(user_id=user_id, limit=limit, offset=offset, q=q)
     total = models.count_prompts(user_id=user_id, q=q)
+    offset = clamp_offset(offset, total, limit)
+    items = models.list_prompts(user_id=user_id, limit=limit, offset=offset, q=q)
     return jsonify(paginated(items, total, limit, offset))
 
 

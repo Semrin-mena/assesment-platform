@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS marlin_tests (
 
 CREATE TABLE IF NOT EXISTS marlin_reviews (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    marlin_test_id  INTEGER NOT NULL REFERENCES marlin_tests(id) UNIQUE,
+    marlin_test_id  INTEGER NOT NULL UNIQUE REFERENCES marlin_tests(id) ON DELETE CASCADE,
     reviewer_id     INTEGER NOT NULL REFERENCES users(id),
     status          TEXT    NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'submitted')),
     final_percent   REAL,
@@ -69,3 +69,15 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     name        TEXT PRIMARY KEY,
     applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_username             ON users(username);
+CREATE INDEX IF NOT EXISTS idx_users_email                ON users(email);
+CREATE INDEX IF NOT EXISTS idx_prompts_user_id            ON prompts(user_id);
+CREATE INDEX IF NOT EXISTS idx_prompts_created_at         ON prompts(created_at);
+CREATE INDEX IF NOT EXISTS idx_responses_prompt_id        ON responses(prompt_id);
+CREATE INDEX IF NOT EXISTS idx_assessments_prompt_id      ON assessments(prompt_id);
+CREATE INDEX IF NOT EXISTS idx_marlin_tests_user_id       ON marlin_tests(user_id);
+CREATE INDEX IF NOT EXISTS idx_marlin_tests_created_at    ON marlin_tests(created_at);
+CREATE INDEX IF NOT EXISTS idx_marlin_reviews_test_id     ON marlin_reviews(marlin_test_id);
+CREATE INDEX IF NOT EXISTS idx_marlin_reviews_reviewer_id ON marlin_reviews(reviewer_id);
+CREATE INDEX IF NOT EXISTS idx_marlin_q_scores_review_id  ON marlin_question_scores(review_id);

@@ -15,6 +15,21 @@ function withPageParams(path: string, params?: { limit?: number; offset?: number
   return s ? `${path}?${s}` : path;
 }
 
+// Skip the auto-logout side-effect for these paths so a wrong-password attempt
+// doesn't try to "log the user out" (they aren't logged in).
+const AUTH_PATHS_THAT_RETURN_401 = ["/api/auth/login", "/api/auth/me"];
+
+function handleSessionExpired() {
+  if (typeof window === "undefined") return;
+  // Clear token and bounce to login. We avoid importing the auth context here
+  // to keep this module framework-agnostic; auth-context picks up the missing
+  // token on next mount.
+  localStorage.removeItem("token");
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.replace("/login?expired=1");
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -28,6 +43,11 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
     ...options,
   });
+
+  if (res.status === 401 && token && !AUTH_PATHS_THAT_RETURN_401.some((p) => path.startsWith(p))) {
+    handleSessionExpired();
+    throw new Error("Session expired. Please sign in again.");
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -126,8 +146,16 @@ export async function getMarlinTest(id: number): Promise<MarlinTest> {
   return request<MarlinTest>(`/api/marlin/${id}`);
 }
 
-export async function adminListMarlinTests(params?: PageParams): Promise<Paginated<MarlinTest>> {
-  return request<Paginated<MarlinTest>>(withPageParams("/api/marlin/admin/all", params));
+export async function adminListMarlinTests(
+  params?: PageParams & { review_status?: "pending" | "in_review" | "reviewed" }
+): Promise<Paginated<MarlinTest>> {
+  const qs = new URLSearchParams();
+  if (params?.limit != null) qs.set("limit", String(params.limit));
+  if (params?.offset != null) qs.set("offset", String(params.offset));
+  if (params?.q) qs.set("q", params.q);
+  if (params?.review_status) qs.set("review_status", params.review_status);
+  const s = qs.toString();
+  return request<Paginated<MarlinTest>>(`/api/marlin/admin/all${s ? `?${s}` : ""}`);
 }
 
 // --- Admin ---

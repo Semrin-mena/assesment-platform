@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request, g
 
 from app import models
 from app.auth import require_admin
-from app.pagination import get_page_params, get_search_query, paginated
+from app.pagination import clamp_offset, get_page_params, get_search_query, paginated
 
 VALID_ROLES = {"tasker", "admin", "reviewer"}
 
@@ -15,8 +15,9 @@ def list_all_submissions():
     """List all prompts from all users — admin only."""
     limit, offset = get_page_params()
     q = get_search_query()
-    items = models.list_prompts(user_id=None, limit=limit, offset=offset, q=q)
     total = models.count_prompts(user_id=None, q=q)
+    offset = clamp_offset(offset, total, limit)
+    items = models.list_prompts(user_id=None, limit=limit, offset=offset, q=q)
     return jsonify(paginated(items, total, limit, offset))
 
 
@@ -44,8 +45,9 @@ def list_all_users():
     """List all registered users — admin only."""
     limit, offset = get_page_params()
     q = get_search_query()
-    items = models.list_users(limit=limit, offset=offset, q=q)
     total = models.count_users(q=q)
+    offset = clamp_offset(offset, total, limit)
+    items = models.list_users(limit=limit, offset=offset, q=q)
     return jsonify(paginated(items, total, limit, offset))
 
 

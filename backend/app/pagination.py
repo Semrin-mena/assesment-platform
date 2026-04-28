@@ -31,5 +31,17 @@ def get_search_query():
     return raw[:MAX_QUERY_LEN]
 
 
+def clamp_offset(offset, total, limit):
+    """Clamp offset so it never points past the last valid page.
+
+    If the caller asks for ?offset=999 on a 12-item list with limit=20, return 0
+    instead of an empty page that confuses the UI ("Page 50 of 1").
+    """
+    if total <= 0:
+        return 0
+    last_page_offset = ((total - 1) // limit) * limit
+    return max(0, min(offset, last_page_offset))
+
+
 def paginated(items, total, limit, offset):
     return {"items": items, "total": total, "limit": limit, "offset": offset}

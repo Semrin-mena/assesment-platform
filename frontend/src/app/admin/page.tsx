@@ -9,6 +9,7 @@ import Pagination from "@/components/Pagination";
 import UserFormModal from "@/components/UserFormModal";
 
 type Tab = "marlin" | "submissions" | "users";
+type ReviewFilter = "all" | "pending" | "in_review" | "reviewed";
 
 const PAGE_SIZE = 20;
 
@@ -29,14 +30,17 @@ export default function AdminPage() {
   const [usersOffset, setUsersOffset] = useState(0);
 
   const [tab, setTab] = useState<Tab>("marlin");
+  const [marlinFilter, setMarlinFilter] = useState<ReviewFilter>("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const [userModal, setUserModal] = useState<{ mode: "create" | "edit"; user?: User } | null>(null);
+  const [userBanner, setUserBanner] = useState<{ kind: "success" | "error"; message: string } | null>(null);
 
-  const loadMarlin = useCallback((offset: number, q: string) => {
-    return adminListMarlinTests({ limit: PAGE_SIZE, offset, q })
+  const loadMarlin = useCallback((offset: number, q: string, filter: ReviewFilter) => {
+    const review_status = filter === "all" ? undefined : filter;
+    return adminListMarlinTests({ limit: PAGE_SIZE, offset, q, review_status })
       .then((res) => {
         setMarlinTests(res.items);
         setMarlinTotal(res.total);
@@ -67,11 +71,16 @@ export default function AdminPage() {
 
   const handleDeleteUser = useCallback(async (target: User) => {
     if (!confirm(`Delete ${target.username}? This cannot be undone.`)) return;
+    setUserBanner(null);
     try {
       await adminDeleteUser(target.id);
       loadUsers(usersOffset, search);
+      setUserBanner({ kind: "success", message: `Deleted ${target.username}.` });
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Delete failed");
+      setUserBanner({
+        kind: "error",
+        message: err instanceof Error ? err.message : "Delete failed",
+      });
     }
   }, [loadUsers, usersOffset, search]);
 
@@ -79,21 +88,21 @@ export default function AdminPage() {
   useEffect(() => {
     if (user?.role !== "admin") return;
     adminGetStats().then(setStats).catch((err) => setError(err.message));
-    Promise.all([loadMarlin(0, ""), loadSubmissions(0, ""), loadUsers(0, "")]).finally(
+    Promise.all([loadMarlin(0, "", "all"), loadSubmissions(0, ""), loadUsers(0, "")]).finally(
       () => setLoading(false)
     );
   }, [user, loadMarlin, loadSubmissions, loadUsers]);
 
-  // Debounced server-side search — refetch only the active tab when search changes.
+  // Debounced server-side search — refetch the active tab when search or filter changes.
   useEffect(() => {
     if (user?.role !== "admin") return;
     const handle = setTimeout(() => {
-      if (tab === "marlin") loadMarlin(0, search);
+      if (tab === "marlin") loadMarlin(0, search, marlinFilter);
       else if (tab === "submissions") loadSubmissions(0, search);
       else loadUsers(0, search);
     }, 300);
     return () => clearTimeout(handle);
-  }, [search, tab, user, loadMarlin, loadSubmissions, loadUsers]);
+  }, [search, tab, marlinFilter, user, loadMarlin, loadSubmissions, loadUsers]);
 
   if (!user || user.role !== "admin") {
     return (
@@ -198,9 +207,37 @@ export default function AdminPage() {
       {/* ── Marlin Tests tab ── */}
       {tab === "marlin" && (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {(
+              [
+                { id: "all", label: "All" },
+                { id: "pending", label: "Pending" },
+                { id: "in_review", label: "In review" },
+                { id: "reviewed", label: "Reviewed" },
+              ] as { id: ReviewFilter; label: string }[]
+            ).map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setMarlinFilter(f.id)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  marlinFilter === f.id
+                    ? "border border-accent/40 bg-accent-subtle text-accent"
+                    : "border border-border bg-surface text-gray-400 hover:text-white"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
           {marlinTests.length === 0 ? (
             <EmptyState
-              message={search ? `No Marlin Tests matching "${search}"` : "No Marlin Test submissions yet."}
+              message={
+                search
+                  ? `No Marlin Tests matching "${search}"`
+                  : marlinFilter === "all"
+                    ? "No Marlin Test submissions yet."
+                    : `No ${marlinFilter.replace("_", " ")} Marlin Tests.`
+              }
             />
           ) : (
             marlinTests.map((t) => <MarlinRow key={t.id} test={t} />)
@@ -209,7 +246,7 @@ export default function AdminPage() {
             total={marlinTotal}
             limit={PAGE_SIZE}
             offset={marlinOffset}
-            onChange={(o) => loadMarlin(o, search)}
+            onChange={(o) => loadMarlin(o, search, marlinFilter)}
           />
         </div>
       )}
@@ -258,6 +295,24 @@ export default function AdminPage() {
       {/* ── Users tab ── */}
       {tab === "users" && (
         <div className="space-y-3">
+          {userBanner && (
+            <div
+              className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-sm ${
+                userBanner.kind === "success"
+                  ? "border-green-500/30 bg-green-500/10 text-green-300"
+                  : "border-danger/30 bg-danger-subtle text-red-300"
+              }`}
+            >
+              <span>{userBanner.message}</span>
+              <button
+                onClick={() => setUserBanner(null)}
+                className="text-current opacity-60 hover:opacity-100"
+                aria-label="Dismiss"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <div className="flex justify-end">
             <button
               onClick={() => setUserModal({ mode: "create" })}
