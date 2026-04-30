@@ -6,7 +6,7 @@ from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 
 from app.config import Config
-from app.extensions import close_db, init_db
+from app.extensions import close_db, init_db, init_pool
 from app.migrations import run_migrations
 
 log = logging.getLogger(__name__)
@@ -28,7 +28,9 @@ def create_app():
 
     app = Flask(__name__)
     app.config.from_mapping(
-        DATABASE_PATH=Config.DATABASE_PATH,
+        DATABASE_URL=Config.DATABASE_URL,
+        DB_POOL_MIN=Config.DB_POOL_MIN,
+        DB_POOL_MAX=Config.DB_POOL_MAX,
         OPENAI_API_KEY=Config.OPENAI_API_KEY,
         JWT_SECRET=Config.JWT_SECRET,
     )
@@ -36,6 +38,7 @@ def create_app():
     CORS(app, origins=Config.CORS_ORIGINS)
     app.teardown_appcontext(close_db)
 
+    init_pool(app)
     init_db(app)
     run_migrations(app)
 

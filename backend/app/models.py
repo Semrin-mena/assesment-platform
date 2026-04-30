@@ -1,8 +1,14 @@
 import json
+from datetime import datetime, timezone
 
 import bcrypt
 
 from app.extensions import get_db
+
+
+def _now_iso():
+    """UTC timestamp in the same shape that schema defaults produce."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _like_pattern(q):
@@ -18,39 +24,36 @@ def _like_pattern(q):
 def create_user(username, email, password, role="tasker"):
     db = get_db()
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    cursor = db.execute(
-        "INSERT INTO users (username, email, password, role) VALUES (?, ?, ?, ?)",
+    row = db.execute(
+        "INSERT INTO users (username, email, password, role) VALUES (%s, %s, %s, %s) RETURNING id",
         (username, email, hashed, role),
-    )
+    ).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def get_user_by_id(user_id):
     db = get_db()
-    row = db.execute(
-        "SELECT id, username, email, role, created_at FROM users WHERE id = ?",
+    return db.execute(
+        "SELECT id, username, email, role, created_at FROM users WHERE id = %s",
         (user_id,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def get_user_by_username(username):
     db = get_db()
-    row = db.execute(
-        "SELECT id, username, email, password, role, created_at FROM users WHERE username = ?",
+    return db.execute(
+        "SELECT id, username, email, password, role, created_at FROM users WHERE username = %s",
         (username,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def get_user_by_email(email):
     db = get_db()
-    row = db.execute(
-        "SELECT id, username, email, password, role, created_at FROM users WHERE email = ?",
+    return db.execute(
+        "SELECT id, username, email, password, role, created_at FROM users WHERE email = %s",
         (email,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def authenticate_user(username, password):
@@ -67,28 +70,28 @@ def update_user(user_id, *, username=None, email=None, role=None, password=None)
     sets = []
     params = []
     if username is not None:
-        sets.append("username = ?")
+        sets.append("username = %s")
         params.append(username)
     if email is not None:
-        sets.append("email = ?")
+        sets.append("email = %s")
         params.append(email)
     if role is not None:
-        sets.append("role = ?")
+        sets.append("role = %s")
         params.append(role)
     if password is not None:
         hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-        sets.append("password = ?")
+        sets.append("password = %s")
         params.append(hashed)
     if not sets:
         return
     params.append(user_id)
-    db.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = ?", params)
+    db.execute(f"UPDATE users SET {', '.join(sets)} WHERE id = %s", params)
     db.commit()
 
 
 def delete_user(user_id):
     db = get_db()
-    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    db.execute("DELETE FROM users WHERE id = %s", (user_id,))
     db.commit()
 
 
@@ -98,9 +101,9 @@ def user_has_dependents(user_id):
     row = db.execute(
         """
         SELECT
-          (SELECT COUNT(*) FROM prompts WHERE user_id = ?)
-          + (SELECT COUNT(*) FROM marlin_tests WHERE user_id = ?)
-          + (SELECT COUNT(*) FROM marlin_reviews WHERE reviewer_id = ?)
+          (SELECT COUNT(*) FROM prompts WHERE user_id = %s)
+          + (SELECT COUNT(*) FROM marlin_tests WHERE user_id = %s)
+          + (SELECT COUNT(*) FROM marlin_reviews WHERE reviewer_id = %s)
           AS c
         """,
         (user_id, user_id, user_id),
@@ -115,17 +118,17 @@ def list_users(limit=20, offset=0, q=None):
         rows = db.execute(
             """
             SELECT id, username, email, role, created_at FROM users
-            WHERE LOWER(username) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\'
-            ORDER BY created_at DESC LIMIT ? OFFSET ?
+            WHERE LOWER(username) LIKE %s ESCAPE '\\' OR LOWER(email) LIKE %s ESCAPE '\\'
+            ORDER BY created_at DESC LIMIT %s OFFSET %s
             """,
             (pattern, pattern, limit, offset),
         ).fetchall()
     else:
         rows = db.execute(
-            "SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            "SELECT id, username, email, role, created_at FROM users ORDER BY created_at DESC LIMIT %s OFFSET %s",
             (limit, offset),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def count_users(q=None):
@@ -133,7 +136,7 @@ def count_users(q=None):
     pattern = _like_pattern(q)
     if pattern:
         row = db.execute(
-            "SELECT COUNT(*) AS c FROM users WHERE LOWER(username) LIKE ? ESCAPE '\\' OR LOWER(email) LIKE ? ESCAPE '\\'",
+            "SELECT COUNT(*) AS c FROM users WHERE LOWER(username) LIKE %s ESCAPE '\\' OR LOWER(email) LIKE %s ESCAPE '\\'",
             (pattern, pattern),
         ).fetchone()
     else:
@@ -153,12 +156,12 @@ def count_users_by_role():
 
 def create_prompt(user_id, prompt_text):
     db = get_db()
-    cursor = db.execute(
-        "INSERT INTO prompts (user_id, prompt_text) VALUES (?, ?)",
+    row = db.execute(
+        "INSERT INTO prompts (user_id, prompt_text) VALUES (%s, %s) RETURNING id",
         (user_id, prompt_text),
-    )
+    ).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def list_prompts(user_id=None, limit=20, offset=0, q=None):
@@ -172,9 +175,9 @@ def list_prompts(user_id=None, limit=20, offset=0, q=None):
                        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS has_assessment
                 FROM prompts p
                 LEFT JOIN assessments a ON a.prompt_id = p.id
-                WHERE p.user_id = ? AND LOWER(p.prompt_text) LIKE ? ESCAPE '\\'
+                WHERE p.user_id = %s AND LOWER(p.prompt_text) LIKE %s ESCAPE '\\'
                 ORDER BY p.created_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
                 """,
                 (user_id, pattern, limit, offset),
             ).fetchall()
@@ -185,9 +188,9 @@ def list_prompts(user_id=None, limit=20, offset=0, q=None):
                        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS has_assessment
                 FROM prompts p
                 LEFT JOIN assessments a ON a.prompt_id = p.id
-                WHERE p.user_id = ?
+                WHERE p.user_id = %s
                 ORDER BY p.created_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
                 """,
                 (user_id, limit, offset),
             ).fetchall()
@@ -201,9 +204,9 @@ def list_prompts(user_id=None, limit=20, offset=0, q=None):
                 FROM prompts p
                 LEFT JOIN assessments a ON a.prompt_id = p.id
                 JOIN users u ON u.id = p.user_id
-                WHERE LOWER(p.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\'
+                WHERE LOWER(p.prompt_text) LIKE %s ESCAPE '\\' OR LOWER(u.username) LIKE %s ESCAPE '\\'
                 ORDER BY p.created_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
                 """,
                 (pattern, pattern, limit, offset),
             ).fetchall()
@@ -217,11 +220,11 @@ def list_prompts(user_id=None, limit=20, offset=0, q=None):
                 LEFT JOIN assessments a ON a.prompt_id = p.id
                 JOIN users u ON u.id = p.user_id
                 ORDER BY p.created_at DESC
-                LIMIT ? OFFSET ?
+                LIMIT %s OFFSET %s
                 """,
                 (limit, offset),
             ).fetchall()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def count_prompts(user_id=None, q=None):
@@ -230,12 +233,12 @@ def count_prompts(user_id=None, q=None):
     if user_id:
         if pattern:
             row = db.execute(
-                "SELECT COUNT(*) AS c FROM prompts WHERE user_id = ? AND LOWER(prompt_text) LIKE ? ESCAPE '\\'",
+                "SELECT COUNT(*) AS c FROM prompts WHERE user_id = %s AND LOWER(prompt_text) LIKE %s ESCAPE '\\'",
                 (user_id, pattern),
             ).fetchone()
         else:
             row = db.execute(
-                "SELECT COUNT(*) AS c FROM prompts WHERE user_id = ?", (user_id,)
+                "SELECT COUNT(*) AS c FROM prompts WHERE user_id = %s", (user_id,)
             ).fetchone()
     else:
         if pattern:
@@ -243,7 +246,7 @@ def count_prompts(user_id=None, q=None):
                 """
                 SELECT COUNT(*) AS c FROM prompts p
                 JOIN users u ON u.id = p.user_id
-                WHERE LOWER(p.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\'
+                WHERE LOWER(p.prompt_text) LIKE %s ESCAPE '\\' OR LOWER(u.username) LIKE %s ESCAPE '\\'
                 """,
                 (pattern, pattern),
             ).fetchone()
@@ -262,34 +265,32 @@ def count_completed_prompts():
 
 def get_prompt(prompt_id):
     db = get_db()
-    row = db.execute(
-        "SELECT id, user_id, prompt_text, created_at FROM prompts WHERE id = ?",
+    return db.execute(
+        "SELECT id, user_id, prompt_text, created_at FROM prompts WHERE id = %s",
         (prompt_id,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 # --- Responses ---
 
 def create_response(prompt_id, variant, response_text, model_config):
     db = get_db()
-    cursor = db.execute(
-        "INSERT INTO responses (prompt_id, variant, response_text, model_config) VALUES (?, ?, ?, ?)",
+    row = db.execute(
+        "INSERT INTO responses (prompt_id, variant, response_text, model_config) VALUES (%s, %s, %s, %s) RETURNING id",
         (prompt_id, variant, response_text, json.dumps(model_config)),
-    )
+    ).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def get_responses_for_prompt(prompt_id):
     db = get_db()
     rows = db.execute(
-        "SELECT id, prompt_id, variant, response_text, model_config, created_at FROM responses WHERE prompt_id = ?",
+        "SELECT id, prompt_id, variant, response_text, model_config, created_at FROM responses WHERE prompt_id = %s",
         (prompt_id,),
     ).fetchall()
     result = {}
-    for r in rows:
-        d = dict(r)
+    for d in rows:
         d["model_config"] = json.loads(d["model_config"])
         result[d["variant"]] = d
     return result
@@ -299,36 +300,34 @@ def get_responses_for_prompt(prompt_id):
 
 def create_assessment(prompt_id, chosen_variant, justification):
     db = get_db()
-    cursor = db.execute(
-        "INSERT INTO assessments (prompt_id, chosen_variant, justification) VALUES (?, ?, ?)",
+    row = db.execute(
+        "INSERT INTO assessments (prompt_id, chosen_variant, justification) VALUES (%s, %s, %s) RETURNING id",
         (prompt_id, chosen_variant, justification),
-    )
+    ).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def get_assessment_by_prompt(prompt_id):
     db = get_db()
-    row = db.execute(
-        "SELECT id, prompt_id, chosen_variant, justification, created_at FROM assessments WHERE prompt_id = ?",
+    return db.execute(
+        "SELECT id, prompt_id, chosen_variant, justification, created_at FROM assessments WHERE prompt_id = %s",
         (prompt_id,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def get_assessment(assessment_id):
     db = get_db()
-    row = db.execute(
+    return db.execute(
         """
         SELECT a.id, a.prompt_id, a.chosen_variant, a.justification, a.created_at,
                p.prompt_text, p.user_id
         FROM assessments a
         JOIN prompts p ON p.id = a.prompt_id
-        WHERE a.id = ?
+        WHERE a.id = %s
         """,
         (assessment_id,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def list_assessments(user_id=None, limit=20, offset=0):
@@ -340,9 +339,9 @@ def list_assessments(user_id=None, limit=20, offset=0):
                    p.prompt_text
             FROM assessments a
             JOIN prompts p ON p.id = a.prompt_id
-            WHERE p.user_id = ?
+            WHERE p.user_id = %s
             ORDER BY a.created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT %s OFFSET %s
             """,
             (user_id, limit, offset),
         ).fetchall()
@@ -355,18 +354,18 @@ def list_assessments(user_id=None, limit=20, offset=0):
             JOIN prompts p ON p.id = a.prompt_id
             JOIN users u ON u.id = p.user_id
             ORDER BY a.created_at DESC
-            LIMIT ? OFFSET ?
+            LIMIT %s OFFSET %s
             """,
             (limit, offset),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return rows
 
 
 def count_assessments(user_id=None):
     db = get_db()
     if user_id:
         row = db.execute(
-            "SELECT COUNT(*) AS c FROM assessments a JOIN prompts p ON p.id = a.prompt_id WHERE p.user_id = ?",
+            "SELECT COUNT(*) AS c FROM assessments a JOIN prompts p ON p.id = a.prompt_id WHERE p.user_id = %s",
             (user_id,),
         ).fetchone()
     else:
@@ -378,12 +377,12 @@ def count_assessments(user_id=None):
 
 def create_marlin_test(user_id, prompt_text, answers):
     db = get_db()
-    cursor = db.execute(
-        "INSERT INTO marlin_tests (user_id, prompt_text, answers) VALUES (?, ?, ?)",
+    row = db.execute(
+        "INSERT INTO marlin_tests (user_id, prompt_text, answers) VALUES (%s, %s, %s) RETURNING id",
         (user_id, prompt_text, json.dumps(answers)),
-    )
+    ).fetchone()
     db.commit()
-    return cursor.lastrowid
+    return row["id"]
 
 
 def get_marlin_test(test_id):
@@ -394,15 +393,14 @@ def get_marlin_test(test_id):
                u.username
         FROM marlin_tests m
         JOIN users u ON u.id = m.user_id
-        WHERE m.id = ?
+        WHERE m.id = %s
         """,
         (test_id,),
     ).fetchone()
     if not row:
         return None
-    d = dict(row)
-    d["answers"] = json.loads(d["answers"])
-    return d
+    row["answers"] = json.loads(row["answers"])
+    return row
 
 
 _MARLIN_REVIEW_STATUS_CLAUSES = {
@@ -417,15 +415,15 @@ def _marlin_filters(user_id, pattern, review_status):
     where = []
     params = []
     if user_id:
-        where.append("m.user_id = ?")
+        where.append("m.user_id = %s")
         params.append(user_id)
     if pattern:
         if user_id:
-            where.append("LOWER(m.prompt_text) LIKE ? ESCAPE '\\'")
+            where.append("LOWER(m.prompt_text) LIKE %s ESCAPE '\\'")
             params.append(pattern)
         else:
             where.append(
-                "(LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')"
+                "(LOWER(m.prompt_text) LIKE %s ESCAPE '\\' OR LOWER(u.username) LIKE %s ESCAPE '\\')"
             )
             params.extend([pattern, pattern])
     rs = _MARLIN_REVIEW_STATUS_CLAUSES.get(review_status)
@@ -454,48 +452,43 @@ def list_marlin_tests(user_id=None, limit=20, offset=0, q=None, review_status=No
     where, params = _marlin_filters(user_id, pattern, review_status)
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY m.created_at DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
 
     rows = db.execute(sql, params).fetchall()
-    result = []
     for r in rows:
-        d = dict(r)
-        d["answers"] = json.loads(d["answers"])
-        result.append(d)
-    return result
+        r["answers"] = json.loads(r["answers"])
+    return rows
 
 
 # --- Marlin Reviews ---
 
 def get_review_by_test(marlin_test_id):
     db = get_db()
-    row = db.execute(
+    return db.execute(
         """
         SELECT r.id, r.marlin_test_id, r.reviewer_id, r.status, r.final_percent,
                r.submitted_at, r.created_at, r.updated_at,
                u.username AS reviewer_username
         FROM marlin_reviews r
         JOIN users u ON u.id = r.reviewer_id
-        WHERE r.marlin_test_id = ?
+        WHERE r.marlin_test_id = %s
         """,
         (marlin_test_id,),
     ).fetchone()
-    return dict(row) if row else None
 
 
 def get_review_scores(review_id):
     db = get_db()
-    rows = db.execute(
+    return db.execute(
         """
         SELECT id, review_id, question_key, expected_answer, given_answer,
                auto_score, override_score, final_score, weight, notes
         FROM marlin_question_scores
-        WHERE review_id = ?
+        WHERE review_id = %s
         """,
         (review_id,),
     ).fetchall()
-    return [dict(r) for r in rows]
 
 
 def create_review_with_scores(marlin_test_id, reviewer_id, draft_rows):
@@ -506,18 +499,18 @@ def create_review_with_scores(marlin_test_id, reviewer_id, draft_rows):
     """
     db = get_db()
     try:
-        cursor = db.execute(
-            "INSERT INTO marlin_reviews (marlin_test_id, reviewer_id, status) VALUES (?, ?, 'draft')",
+        row = db.execute(
+            "INSERT INTO marlin_reviews (marlin_test_id, reviewer_id, status) VALUES (%s, %s, 'draft') RETURNING id",
             (marlin_test_id, reviewer_id),
-        )
-        review_id = cursor.lastrowid
+        ).fetchone()
+        review_id = row["id"]
         for r in draft_rows:
             db.execute(
                 """
                 INSERT INTO marlin_question_scores
                     (review_id, question_key, expected_answer, given_answer,
                      auto_score, override_score, final_score, weight)
-                VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, NULL, %s, %s)
                 """,
                 (review_id, r["question_key"], r["expected_answer"], r["given_answer"],
                  r["auto_score"], r["final_score"], r["weight"]),
@@ -534,8 +527,8 @@ def update_review_score(review_id, question_key, override_score, final_score, no
     db.execute(
         """
         UPDATE marlin_question_scores
-        SET override_score = ?, final_score = ?, notes = ?
-        WHERE review_id = ? AND question_key = ?
+        SET override_score = %s, final_score = %s, notes = %s
+        WHERE review_id = %s AND question_key = %s
         """,
         (override_score, final_score, notes, review_id, question_key),
     )
@@ -544,24 +537,24 @@ def update_review_score(review_id, question_key, override_score, final_score, no
 
 def update_review(review_id, status, final_percent):
     db = get_db()
+    now_str = _now_iso()
     if status == "submitted":
         db.execute(
             """
             UPDATE marlin_reviews
-            SET status = ?, final_percent = ?, submitted_at = datetime('now'),
-                updated_at = datetime('now')
-            WHERE id = ?
+            SET status = %s, final_percent = %s, submitted_at = %s, updated_at = %s
+            WHERE id = %s
             """,
-            (status, final_percent, review_id),
+            (status, final_percent, now_str, now_str, review_id),
         )
     else:
         db.execute(
             """
             UPDATE marlin_reviews
-            SET status = ?, final_percent = ?, updated_at = datetime('now')
-            WHERE id = ?
+            SET status = %s, final_percent = %s, updated_at = %s
+            WHERE id = %s
             """,
-            (status, final_percent, review_id),
+            (status, final_percent, now_str, review_id),
         )
     db.commit()
 
@@ -591,21 +584,20 @@ def list_review_queue(reviewer_id, status=None, limit=20, offset=0, q=None):
     if reviewer_id is not None and status != "pending":
         # When listing reviewed items, restrict to this reviewer's own reviews.
         # Pending items have no reviewer attached yet, so don't filter there.
-        where.append("(r.reviewer_id = ? OR r.id IS NULL)")
+        where.append("(r.reviewer_id = %s OR r.id IS NULL)")
         params.append(reviewer_id)
 
     if pattern:
-        where.append("(LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')")
+        where.append("(LOWER(m.prompt_text) LIKE %s ESCAPE '\\' OR LOWER(u.username) LIKE %s ESCAPE '\\')")
         params.extend([pattern, pattern])
 
     sql = base
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY m.created_at DESC LIMIT ? OFFSET ?"
+    sql += " ORDER BY m.created_at DESC LIMIT %s OFFSET %s"
     params.extend([limit, offset])
 
-    rows = db.execute(sql, params).fetchall()
-    return [dict(r) for r in rows]
+    return db.execute(sql, params).fetchall()
 
 
 def count_review_queue(reviewer_id, status=None, q=None):
@@ -624,10 +616,10 @@ def count_review_queue(reviewer_id, status=None, q=None):
     elif status == "reviewed":
         where.append("r.status = 'submitted'")
     if reviewer_id is not None and status != "pending":
-        where.append("(r.reviewer_id = ? OR r.id IS NULL)")
+        where.append("(r.reviewer_id = %s OR r.id IS NULL)")
         params.append(reviewer_id)
     if pattern:
-        where.append("(LOWER(m.prompt_text) LIKE ? ESCAPE '\\' OR LOWER(u.username) LIKE ? ESCAPE '\\')")
+        where.append("(LOWER(m.prompt_text) LIKE %s ESCAPE '\\' OR LOWER(u.username) LIKE %s ESCAPE '\\')")
         params.extend([pattern, pattern])
     if where:
         sql += " WHERE " + " AND ".join(where)

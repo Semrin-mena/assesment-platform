@@ -6,7 +6,7 @@ Internal evaluation platform with three roles:
 - **Reviewer** — scores Marlin Test submissions; multiple-choice questions are auto-graded with reviewer override.
 - **Admin** — manages users (CRUD + role assignment) and reads submitted reviews for QA.
 
-Stack: **Flask + SQLite** (backend) · **Next.js 16 + React 19 + Tailwind v4** (frontend).
+Stack: **Flask + PostgreSQL** (backend) · **Next.js 16 + React 19 + Tailwind v4** (frontend).
 
 ---
 
@@ -37,10 +37,10 @@ npm run dev                      # http://localhost:3000
 
 ### First admin
 
-The DB starts empty. Register one user via `/register` (creates a tasker), then promote them to `admin` directly in SQLite:
+The DB starts empty. Register one user via `/register` (creates a tasker), then promote them to `admin` directly in Postgres:
 
 ```bash
-sqlite3 backend/instance/database.db "UPDATE users SET role='admin' WHERE id=1;"
+psql "$DATABASE_URL" -c "UPDATE users SET role='admin' WHERE id=1;"
 ```
 
 From then on, use the admin Users tab to create reviewers and additional accounts.
@@ -59,7 +59,9 @@ From then on, use the admin Users tab to create reviewers and additional account
 | `JWT_SECRET`      | Random ≥32-char string. Generate: `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
 | `OPENAI_API_KEY`  | API key for `gpt-4o`.                                                     |
 | `CORS_ORIGINS`    | Comma-separated frontend origins, e.g. `https://app.example.com`.         |
-| `DATABASE_PATH`   | Absolute path on a persistent volume, e.g. `/var/data/database.db`.       |
+| `DATABASE_URL`    | PostgreSQL connection string, e.g. `postgresql://user:pass@127.0.0.1:5432/assessment`. |
+| `DB_POOL_MIN`     | Optional. Min pool size (default `1`).                                    |
+| `DB_POOL_MAX`     | Optional. Max pool size (default `10`).                                   |
 | `LOG_LEVEL`       | Optional. `INFO` (default), `WARNING`, `DEBUG`.                           |
 
 `Config.validate()` runs on app boot and refuses to start production if any of `JWT_SECRET`, `OPENAI_API_KEY`, or `CORS_ORIGINS` are missing/insecure.
@@ -104,13 +106,20 @@ The backend exposes `GET /api/health` returning `{"status":"ok"}` for load balan
 
 ### Database
 
-SQLite is fine for a small private deployment (≤ ~20 concurrent writers). The DB file lives at `DATABASE_PATH` and must be on a **persistent volume** — losing the file means losing every user, prompt, and review. Schema migrations run automatically on every boot via [backend/app/migrations.py](backend/app/migrations.py).
+The backend uses **PostgreSQL**. On boot, [backend/app/extensions.py](backend/app/extensions.py) opens a `psycopg` connection pool, runs [schema.sql](backend/app/schema.sql) (idempotent, `CREATE ... IF NOT EXISTS`), and applies any pending migrations from [backend/app/migrations.py](backend/app/migrations.py).
 
-For higher concurrency, plan a Postgres migration. As a stopgap, enable WAL mode:
+Provision the role + database once:
 
 ```bash
-sqlite3 path/to/database.db "PRAGMA journal_mode=WAL;"
+sudo -u postgres psql <<'SQL'
+CREATE ROLE assessment WITH LOGIN PASSWORD 'change-me';
+CREATE DATABASE assessment OWNER assessment;
+SQL
 ```
+
+Then point the backend at it via `DATABASE_URL=postgresql://assessment:change-me@127.0.0.1:5432/assessment`.
+
+Back up nightly with `pg_dump "$DATABASE_URL" > backup.sql` (the connection pool keeps the live DB happy during the dump).
 
 ### Logs
 

@@ -4,5 +4,7 @@ openai>=1.0.0
 python-dotenv==1.1.0
 bcrypt==4.3.0
 PyJWT==2.10.1
+psycopg[binary]==3.3.3
+psycopg-pool==3.3.0
 gunicorn==23.0.0; platform_system != "Windows"
 waitress==3.0.2
